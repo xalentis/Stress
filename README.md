@@ -1,3 +1,2 @@
-# Ensemble Machine Learning Model Trained on Combined Public Datasets Generalizes Well for Stress Prediction Using Wearable Device Biomarkers
-
-Gideon Vos, Kelly Trinh, Zoltan Sarnyai, Mostafa Rahimi Azghadi
+# Investigating Wearable Sensor Biomarkers for Chronic Stress Measurement and Analysis
+# Gideon Vos, Master of Philosophy, James Cook University, 2022
