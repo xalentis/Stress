@@ -46,7 +46,7 @@ options(scipen=999)
 set.seed(123)
 
 #########################################################################################################################################################
-# Merge four datasets for training, no log transform, no feature engineering
+# Merge four datasets for training no feature engineering
 #########################################################################################################################################################
 data_neuro <- stresshelpers::make_neuro_data('NEURO', feature_engineering = FALSE)
 data_swell <- stresshelpers::make_swell_data('SWELL', feature_engineering = FALSE)

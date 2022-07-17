@@ -51,16 +51,10 @@ options(scipen=999)
 #########################################################################################################################################################
 # Explore Part 1 - No Log Transform, NO FEATURE ENGINEERING
 #########################################################################################################################################################
-data_swell <- stresshelpers::make_swell_data('SWELL', log_transform = FALSE, feature_engineering = FALSE)   # 157739 observations, 9 subjects
-data_wesad <- stresshelpers::make_wesad_data('WESAD', log_transform = FALSE, feature_engineering = FALSE)   # 26385 observations, 14 subjects
-data_neuro <- stresshelpers::make_neuro_data('NEURO', log_transform = FALSE, feature_engineering = FALSE)   # 20060 observations, 20 subjects
-data_ubfc <-  stresshelpers::make_ubfc_data('UBFC', log_transform = FALSE, feature_engineering = FALSE)     # 40215 observations, 54 subjects
-
-# one-way anova test on all 99 subjects
-test_data <- rbind(data_swell, data_wesad, data_neuro, data_ubfc)
-# Compute the analysis of variance
-res.aov <- aov(eda + hr ~ metric, data = test_data)
-summary(res.aov) # As the p-value is less than the significance level 0.05, we can conclude that there are significant differences in sensor means
+data_swell <- stresshelpers::make_swell_data('SWELL', feature_engineering = FALSE)   # 157739 observations, 9 subjects
+data_wesad <- stresshelpers::make_wesad_data('WESAD', feature_engineering = FALSE)   # 26385 observations, 14 subjects
+data_neuro <- stresshelpers::make_neuro_data('NEURO', feature_engineering = FALSE)   # 20060 observations, 20 subjects
+data_ubfc <-  stresshelpers::make_ubfc_data('UBFC', feature_engineering = FALSE)     # 40215 observations, 54 subjects
 
 # subject summary
 data_subjects <- data.frame()
@@ -201,16 +195,10 @@ plot(power, type='b') # we will need at least 85 subjects or more
 #########################################################################################################################################################
 # Explore Part 2 - WITH FEATURE ENGINEERING (rolling windows of 25 seconds, log-transform of eda and hr)
 #########################################################################################################################################################
-neuro_expanded <- stresshelpers::make_neuro_data('NEURO', log_transform = TRUE, feature_engineering = TRUE)
-swell_expanded <- stresshelpers::make_swell_data('SWELL', log_transform = TRUE, feature_engineering = TRUE)
-wesad_expanded <- stresshelpers::make_wesad_data('WESAD', log_transform = TRUE, feature_engineering = TRUE)
-ubfc_expanded <-  stresshelpers::make_ubfc_data('UBFC', log_transform = TRUE, feature_engineering = TRUE)
-
-# one-way anova test
-test_data <- rbind(neuro_expanded, swell_expanded, wesad_expanded, ubfc_expanded)
-# Compute the analysis of variance
-res.aov <- aov(eda + hr ~ metric, data = test_data)
-summary(res.aov) # As the p-value is less than the significance level 0.05, we can conclude that there are significant differences in sensor means
+neuro_expanded <- stresshelpers::make_neuro_data('NEURO', feature_engineering = TRUE)
+swell_expanded <- stresshelpers::make_swell_data('SWELL', feature_engineering = TRUE)
+wesad_expanded <- stresshelpers::make_wesad_data('WESAD', feature_engineering = TRUE)
+ubfc_expanded <-  stresshelpers::make_ubfc_data('UBFC', feature_engineering = TRUE)
 
 # correlation - no difference
 names(neuro_expanded) <- c("EDA","HR","STRESS","Subject")
@@ -224,10 +212,10 @@ corrplot(cor(ubfc_expanded[,c("EDA","HR","STRESS")], method="spearman"), method=
 corrplot(cor(neuro_expanded[,c("EDA","HR","STRESS")], method="spearman"), method="color", title="",addCoef.col = 'black', number.cex = 1.7,tl.cex=1.5,tl.col = "black", col=col, cl.cex=1.5, cl.ratio = 0.5)
 
 # reload data for boxplots to fix names
-neuro_expanded <- stresshelpers::make_neuro_data('NEURO', log_transform = TRUE, feature_engineering = TRUE)
-swell_expanded <- stresshelpers::make_swell_data('SWELL', log_transform = TRUE, feature_engineering = TRUE)
-wesad_expanded <- stresshelpers::make_wesad_data('WESAD', log_transform = TRUE, feature_engineering = TRUE)
-ubfc_expanded <-  stresshelpers::make_ubfc_data('UBFC', log_transform = TRUE, feature_engineering = TRUE)
+neuro_expanded <- stresshelpers::make_neuro_data('NEURO', feature_engineering = TRUE)
+swell_expanded <- stresshelpers::make_swell_data('SWELL', feature_engineering = TRUE)
+wesad_expanded <- stresshelpers::make_wesad_data('WESAD', feature_engineering = TRUE)
+ubfc_expanded <-  stresshelpers::make_ubfc_data('UBFC', feature_engineering = TRUE)
 
 # merge and box plots
 data <- rbind(neuro_expanded, swell_expanded, wesad_expanded, ubfc_expanded)

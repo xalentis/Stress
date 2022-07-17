@@ -56,9 +56,9 @@ data_wesad <- stresshelpers::make_wesad_data('WESAD', feature_engineering = TRUE
 data_ubfc  <-  stresshelpers::make_ubfc_data('UBFC',  feature_engineering = TRUE)
 data <- rbind(data_neuro, data_swell, data_wesad, data_ubfc) # 99 subjects
 
-data <- data %>% select(hrmax,hrmin,hrstd,hrmedian,hr,edaskew,edastd,hrmean,eda,edarange, Subject, metric)
+data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
 
-rm(data_neuro, data_swell, data_wesad, data_ubfc, metric, subjects)
+rm(data_neuro, data_swell, data_wesad, data_ubfc)
 gc()
 
 #########################################################################################################################################################
@@ -92,7 +92,7 @@ model_xgb <- xgb.train(
   verbose = 1
 )
 
-# [206]	train-rmse:0.006377	test-rmse:0.007004
+# [127]	train-rmse:0.025715	test-rmse:0.024722
 
 #########################################################################################################################################################
 # Build Neural Network Model
@@ -141,15 +141,15 @@ history <- fit(
   callbacks        = list(callback_early_stopping(monitor = "val_loss", patience = 5, restore_best_weights = TRUE))
 )
 
-# 360/360 [==============================] - 1s 2ms/step - loss: 0.1424 - val_loss: 0.1423
+# 360/360 [==============================] - 1s 2ms/step - loss: 0.1253 - val_loss: 0.1242
 
 #########################################################################################################################################################
 # Test on unseen TOADSTOOL data - no metric or label available
 #########################################################################################################################################################
-weighted <- function(xgb, ann) (xgb*0.50) + (ann*0.50)
+weighted <- function(xgb, ann) (xgb*55) + (ann*45)
 
 data_toadstool <- stresshelpers::make_toadstool_data('TOADSTOOL')
-data_toadstool <- data_toadstool %>% select(hrmax,hrmin,hrstd,hrmedian,hr,edaskew,edastd,hrmean,eda,edarange, Subject)
+data_toadstool <- data_toadstool %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject)
 
 x_val <- data_toadstool[,1:10]
 

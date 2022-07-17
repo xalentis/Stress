@@ -33,6 +33,7 @@
 # A Wearable Exam Stress Dataset for Predicting Cognitive Performance in Real-World Settings
 # Amin, M. R., Wickramasuriya, D., & Faghih, R. T. (2022). A Wearable Exam Stress Dataset for Predicting Cognitive Performance in Real-World Settings (version 1.0.0). 
 # PhysioNet. https://doi.org/10.13026/kvkb-aj90.
+
 library(dplyr)
 library(caret)
 library(xgboost)
@@ -53,7 +54,7 @@ data_wesad <- stresshelpers::make_wesad_data('WESAD', feature_engineering = TRUE
 data_ubfc  <-  stresshelpers::make_ubfc_data('UBFC',  feature_engineering = TRUE)
 data <- rbind(data_neuro, data_swell, data_wesad, data_ubfc) # 99 subjects
 
-data <- data %>% select(hrmax,hrmin,hrstd,hrmedian,hr,edaskew,edastd,hrmean,eda,edarange, Subject, metric)
+data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
 
 #########################################################################################################################################################
 # Parameter Search
@@ -114,7 +115,7 @@ scale_pos_weight = nrow(train[train$metric==0,])/nrow(train[train$metric==1,])
 params <- list(
   eta = 0.5, 
   max_depth = 8, 
-  subsample = 0.35,
+  subsample = 0.7,#0.35,
   colsample_bytree = 0.8
 )
 
@@ -134,11 +135,11 @@ model <- xgb.train(
 )
 
 # Best iteration:
-# [256]	train-rmse:0.005864	test-rmse:0.005726
+# [133]	train-rmse:0.026422	test-rmse:0.026493
 
 pred <- predict(model, as.matrix(val[,1:10]))
 pred <- round(pred) # round to 0/1 for binary classification (no stress vs. stress)
-print(sum(as.numeric(val$metric == pred))/nrow(val)) # 99.99% on hold-out set
+print(sum(as.numeric(val$metric == pred))/nrow(val)) # 99.90% on hold-out set
 
 # precision, recall, F1 score
 precision <- posPredValue(as.factor(pred), as.factor(val$metric), positive="1") # 0.99

@@ -1,4 +1,4 @@
-# Experiment 6
+# Experiment 7
 
 # Investigating Wearable Sensor Biomarkers for Chronic Stress Measurement and Analysis
 # Gideon Vos, Master of Philosophy, James Cook University, 2022
@@ -55,16 +55,24 @@ data_swell <- stresshelpers::make_swell_data('SWELL', feature_engineering = TRUE
 data_wesad <- stresshelpers::make_wesad_data('WESAD', feature_engineering = TRUE)
 data_ubfc  <-  stresshelpers::make_ubfc_data('UBFC',  feature_engineering = TRUE)
 
-# balancing across data sources: XGB
+# balancing across data sources for XGB
 data_neuro$Balance <- 1
 data_swell$Balance <- 1
 data_wesad$Balance <- 1
 data_ubfc$Balance <- 0
 
 data <- rbind(data_neuro, data_swell, data_wesad, data_ubfc) # 99 subjects
-data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
+data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, Balance, metric)
 
 rm(data_neuro, data_swell, data_wesad, data_ubfc)
+gc()
+
+# make random validation set - 10% of StressData
+subjects <- unique(data$Subject)
+val_subjects <- {set.seed(43); sample(subjects, size=10, replace=FALSE)}
+val <- data[data$Subject %in% val_subjects,]
+data <- data[!(data$Subject %in% val_subjects),]
+val$Balance <- NULL
 gc()
 
 #########################################################################################################################################################
@@ -98,7 +106,7 @@ model_xgb <- xgb.train(
   verbose = 1
 )
 
-# [127]	train-rmse:0.025715	test-rmse:0.024722
+# [104]	train-rmse:0.026147	test-rmse:0.025332
 
 #########################################################################################################################################################
 # Build Neural Network Model
@@ -147,22 +155,53 @@ history <- fit(
   callbacks        = list(callback_early_stopping(monitor = "val_loss", patience = 5, restore_best_weights = TRUE))
 )
 
-# 360/360 [==============================] - 1s 2ms/step - loss: 0.1240 - val_loss: 0.1237
+# 322/322 [==============================] - 1s 2ms/step - loss: 0.1433 - val_loss: 0.1440
 
 rm(data, history, params, test, train, train.index, watchlist, x_test, dtest, dtrain, scale_pos_weight, y_test, y_train)
 gc()
 
 #########################################################################################################################################################
-# Test on unseen EXAM data
+# Test on unseen validation data
 #########################################################################################################################################################
-
-exam_data <- stresshelpers::make_exam_data('EXAM')
-exam_data <- exam_data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject)
 
 # ensemble weighting
 weighted <- function(xgb, ann) (xgb*0.55) + (ann*0.45)
 
-temp <- exam_data[exam_data$Subject=='S1_Final',]
+mean_acc <- 0
+for (subject in val_subjects)
+{
+  temp <- val[val$Subject==subject,]
+  x_val <- temp[,1:10]
+  yhat_xgb <- predict(model_xgb, as.matrix(x_val))
+  x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
+  yhat_nn <- as.data.frame(predict(model_nn, x_val))
+  yhat_nn <- yhat_nn[,1]
+  yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
+  yhat_ens <- weighted(yhat_xgb, yhat_nn)
+  yhat_xgb <- round(yhat_xgb)
+  yhat_nn <- round(yhat_nn)
+  yhat_ens <- round(yhat_ens)
+  temp <- cbind(yhat_xgb, yhat_nn, yhat_ens, temp$metric)
+  temp <- as.data.frame(temp)
+  names(temp) <- c("xgb","ann","ens","metric")
+  acc <- sum(as.numeric(temp$metric == yhat_ens))/nrow(temp)
+  print(paste(subject, acc))
+  mean_acc <- mean_acc + acc
+}
+print(paste('Acc:', mean(mean_acc)/length(val_subjects))) # 76%. Worst = U1 (0), 6 > 92%,
+# "U1 0"
+# "W14 0.65472"
+# "U25 1"
+# "S1 0.412271540469974"
+# "U23 1"
+# "N5 0.618803418803419"
+# "U47 1"
+# "U13 0.928571428571429"
+# "U45 1"
+# "U34 1"
+# "Acc: 0.761436638784482"
+
+temp <- val[val$Subject=='U1',]
 x_val <- temp[,1:10]
 yhat_xgb <- predict(model_xgb, as.matrix(x_val))
 x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
@@ -170,20 +209,48 @@ yhat_nn <- as.data.frame(predict(model_nn, x_val))
 yhat_nn <- yhat_nn[,1]
 yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
 yhat_ens <- weighted(yhat_xgb, yhat_nn)
-temp <- cbind(yhat_xgb, yhat_nn, yhat_ens)
+temp <- cbind(yhat_xgb, yhat_nn, yhat_ens, temp$metric)
 temp <- as.data.frame(temp)
-names(temp) <- c("xgb","ann","ens")
+names(temp) <- c("xgb","ann","ens","metric")
 temp$ID <- seq.int(nrow(temp))
 ggplot(temp, aes(x=ID)) + 
   geom_smooth(aes(x=ID, y=ens), method = lm, formula = y ~ splines::bs(x, 14), se = FALSE)+
-  geom_line(aes(y = ens, colour="ENS"),  size=1,  alpha=0.4) + 
+  geom_line(aes(y = ens, colour="ENS"),  alpha=0.4, size=0.5) + 
+  geom_line(aes(y = metric, colour="STRESS"),  alpha=0.4, size=0.5) + 
   scale_color_manual(values=c("#0f5875","#b24228", "#24844c")) + 
   scale_fill_manual(values=c("#0f5875","#b24228", "#24844c")) + 
   labs(colour="Model") + 
   guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
-  theme_classic() + ylab('Stress - S1 (Final)') + xlab('Time (seconds)') + 
+  theme_classic() + ylab('Stress - U1') + xlab('Time (seconds)') + 
+  scale_x_continuous(breaks=seq(0,nrow(temp)+60,60)) +
+  theme(axis.title = element_text(size = 20, family="Times New Roman",face="bold")) +
+  theme(axis.text=element_text(size=14, family="Times New Roman",face="bold")) +
+  theme(plot.title = element_text(family="Times New Roman",face="bold")) +
+  theme(legend.text = element_text(family="Times New Roman",face="bold", size=14)) +
+  theme(legend.title =  element_text(family="Times New Roman",face="bold", size=14))
+
+temp <- val[val$Subject=='W14',]
+x_val <- temp[,1:10]
+yhat_xgb <- predict(model_xgb, as.matrix(x_val))
+x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
+yhat_nn <- as.data.frame(predict(model_nn, x_val))
+yhat_nn <- yhat_nn[,1]
+yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
+yhat_ens <- weighted(yhat_xgb, yhat_nn)
+temp <- cbind(yhat_xgb, yhat_nn, yhat_ens, temp$metric)
+temp <- as.data.frame(temp)
+names(temp) <- c("xgb","ann","ens","metric")
+temp$ID <- seq.int(nrow(temp))
+ggplot(temp, aes(x=ID)) + 
+  geom_smooth(aes(x=ID, y=ens), method = lm, formula = y ~ splines::bs(x, 14), se = FALSE)+
+  geom_line(aes(y = ens, colour="ENS"),  alpha=0.4, size=0.5) + 
+  geom_area(aes(y = metric, colour="STRESS"), fill="#b24228",  alpha=0.4, size=0.5) + 
+  scale_color_manual(values=c("#0f5875","#b24228", "#24844c")) + 
+  scale_fill_manual(values=c("#0f5875","#b24228", "#24844c")) + 
+  labs(colour="Model") + 
+  guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
+  theme_classic() + ylab('Stress - W14') + xlab('Time (seconds)') + 
   scale_x_continuous(breaks=seq(0,nrow(temp)+1200,1200)) +
-  scale_y_continuous(limits=c(0,1))+
   theme(axis.title = element_text(size = 20, family="Times New Roman",face="bold")) +
   theme(axis.text=element_text(size=14, family="Times New Roman",face="bold")) +
   theme(plot.title = element_text(family="Times New Roman",face="bold")) +
@@ -191,7 +258,7 @@ ggplot(temp, aes(x=ID)) +
   theme(legend.title =  element_text(family="Times New Roman",face="bold", size=14))
 
 
-temp <- exam_data[exam_data$Subject=='S10_Final',]
+temp <- val[val$Subject=='U25',]
 x_val <- temp[,1:10]
 yhat_xgb <- predict(model_xgb, as.matrix(x_val))
 x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
@@ -199,20 +266,76 @@ yhat_nn <- as.data.frame(predict(model_nn, x_val))
 yhat_nn <- yhat_nn[,1]
 yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
 yhat_ens <- weighted(yhat_xgb, yhat_nn)
-temp <- cbind(yhat_xgb, yhat_nn, yhat_ens)
+temp <- cbind(yhat_xgb, yhat_nn, yhat_ens, temp$metric)
 temp <- as.data.frame(temp)
-names(temp) <- c("xgb","ann","ens")
+names(temp) <- c("xgb","ann","ens","metric")
 temp$ID <- seq.int(nrow(temp))
 ggplot(temp, aes(x=ID)) + 
   geom_smooth(aes(x=ID, y=ens), method = lm, formula = y ~ splines::bs(x, 14), se = FALSE)+
-  geom_line(aes(y = ens, colour="ENS"),  size=1,  alpha=0.4) + 
+  geom_line(aes(y = ens, colour="ENS"),  alpha=0.4, size=0.5) + 
+  geom_line(aes(y = metric, colour="STRESS"),  alpha=0.4, size=0.5) + 
   scale_color_manual(values=c("#0f5875","#b24228", "#24844c")) + 
   scale_fill_manual(values=c("#0f5875","#b24228", "#24844c")) + 
   labs(colour="Model") + 
   guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
-  theme_classic() + ylab('Stress - S10 (Final)') + xlab('Time (seconds)') + 
+  theme_classic() + ylab('Stress - U25') + xlab('Time (seconds)') + 
   scale_x_continuous(breaks=seq(0,nrow(temp)+1200,1200)) +
-  scale_y_continuous(limits=c(0,1))+
+  theme(axis.title = element_text(size = 20, family="Times New Roman",face="bold")) +
+  theme(axis.text=element_text(size=14, family="Times New Roman",face="bold")) +
+  theme(plot.title = element_text(family="Times New Roman",face="bold")) +
+  theme(legend.text = element_text(family="Times New Roman",face="bold", size=14)) +
+  theme(legend.title =  element_text(family="Times New Roman",face="bold", size=14))
+
+temp <- val[val$Subject=='S1',]
+x_val <- temp[,1:10]
+yhat_xgb <- predict(model_xgb, as.matrix(x_val))
+x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
+yhat_nn <- as.data.frame(predict(model_nn, x_val))
+yhat_nn <- yhat_nn[,1]
+yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
+yhat_ens <- weighted(yhat_xgb, yhat_nn)
+temp <- cbind(yhat_xgb, yhat_nn, yhat_ens, temp$metric)
+temp <- as.data.frame(temp)
+names(temp) <- c("xgb","ann","ens","metric")
+temp$ID <- seq.int(nrow(temp))
+ggplot(temp, aes(x=ID)) + 
+  geom_smooth(aes(x=ID, y=ens), method = lm, formula = y ~ splines::bs(x, 14), se = FALSE)+
+  geom_line(aes(y = ens, colour="ENS"),  alpha=0.4, size=0.5) + 
+  geom_area(aes(y = metric, colour="STRESS"), fill="#b24228",  alpha=0.4, size=0.5) + 
+  scale_color_manual(values=c("#0f5875","#b24228", "#24844c")) + 
+  scale_fill_manual(values=c("#0f5875","#b24228", "#24844c")) + 
+  labs(colour="Model") + 
+  guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
+  theme_classic() + ylab('Stress - S1') + xlab('Time (seconds)') + 
+  scale_x_continuous(breaks=seq(0,nrow(temp)+1200,1200)) +
+  theme(axis.title = element_text(size = 20, family="Times New Roman",face="bold")) +
+  theme(axis.text=element_text(size=14, family="Times New Roman",face="bold")) +
+  theme(plot.title = element_text(family="Times New Roman",face="bold")) +
+  theme(legend.text = element_text(family="Times New Roman",face="bold", size=14)) +
+  theme(legend.title =  element_text(family="Times New Roman",face="bold", size=14))
+
+temp <- val[val$Subject=='N5',]
+x_val <- temp[,1:10]
+yhat_xgb <- predict(model_xgb, as.matrix(x_val))
+x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
+yhat_nn <- as.data.frame(predict(model_nn, x_val))
+yhat_nn <- yhat_nn[,1]
+yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
+yhat_ens <- weighted(yhat_xgb, yhat_nn)
+temp <- cbind(yhat_xgb, yhat_nn, yhat_ens, temp$metric)
+temp <- as.data.frame(temp)
+names(temp) <- c("xgb","ann","ens","metric")
+temp$ID <- seq.int(nrow(temp))
+ggplot(temp, aes(x=ID)) + 
+  geom_smooth(aes(x=ID, y=ens), method = lm, formula = y ~ splines::bs(x, 14), se = FALSE)+
+  geom_line(aes(y = ens, colour="ENS"),  alpha=0.4, size=0.5) + 
+  geom_area(aes(y = metric, colour="STRESS"), fill="#b24228",  alpha=0.4, size=0.5) + 
+  scale_color_manual(values=c("#0f5875","#b24228", "#24844c")) + 
+  scale_fill_manual(values=c("#0f5875","#b24228", "#24844c")) + 
+  labs(colour="Model") + 
+  guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
+  theme_classic() + ylab('Stress - N5') + xlab('Time (seconds)') + 
+  scale_x_continuous(breaks=seq(0,nrow(temp)+1200,1200)) +
   theme(axis.title = element_text(size = 20, family="Times New Roman",face="bold")) +
   theme(axis.text=element_text(size=14, family="Times New Roman",face="bold")) +
   theme(plot.title = element_text(family="Times New Roman",face="bold")) +

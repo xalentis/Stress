@@ -46,21 +46,21 @@ options(scipen=999)
 set.seed(123)
 
 #########################################################################################################################################################
-# Train on SWELL, validate on NEURO and WESAD to test generalization, using log transform and feature engineering
+# Train on SWELL, validate on NEURO and WESAD to test generalization, using feature engineering
 #########################################################################################################################################################
 data_neuro <- stresshelpers::make_neuro_data('NEURO', feature_engineering = TRUE)
 data_swell <- stresshelpers::make_swell_data('SWELL', feature_engineering = TRUE)
 data_wesad <- stresshelpers::make_wesad_data('WESAD', feature_engineering = TRUE)
 
-data_neuro <- data_neuro %>% select(hrmax,hrmin,hrstd,hrmedian,hr,edaskew,edastd,hrmean,eda,edarange, Subject, metric)
-data_swell <- data_swell %>% select(hrmax,hrmin,hrstd,hrmedian,hr,edaskew,edastd,hrmean,eda,edarange, Subject, metric)
-data_wesad <- data_wesad %>% select(hrmax,hrmin,hrstd,hrmedian,hr,edaskew,edastd,hrmean,eda,edarange, Subject, metric)
+data_neuro <- data_neuro %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
+data_swell <- data_swell %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
+data_wesad <- data_wesad %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
 
 #########################################################################################################################################################
 # Parameter Search
 #########################################################################################################################################################
 hyper_grid <- expand.grid(
-  max_depth = c(6,8), 
+  max_depth = c(8), 
   eta = c(0.08, 0.1,0.5),
   subsample = c(0.35, 0.5, 0.7),
   colsample_bytree = c(0.4, 0.6, 0.8),
@@ -110,9 +110,9 @@ scale_pos_weight = nrow(train[train$metric==0,])/nrow(train[train$metric==1,])
 # found using hyper parameter search
 params <- list(
   eta = 0.5, 
-  max_depth = 8, 
+  max_depth = 8,
   subsample = 0.7,
-  colsample_bytree = 0.8
+  colsample_bytree = 0.4
 )
 dtrain <- xgb.DMatrix(data = as.matrix(train[,1:10]), label = train$metric)
 dtest <- xgb.DMatrix(data = as.matrix(test[,1:10]), label = test$metric)
@@ -130,7 +130,8 @@ model <- xgb.train(
 )
 
 # Best iteration:
-#[149]	train-rmse:0.003847	test-rmse:0.006398
+# [73]	train-rmse:0.023707	test-rmse:0.024838
+
 importance_matrix <- xgb.importance(model = model)
 xgb.ggplt <- xgb.ggplot.importance(importance_matrix = importance_matrix, top_n = 10)
 xgb.ggplt + theme(text = element_text(size = 20),
@@ -145,21 +146,21 @@ xgb.ggplt + theme(text = element_text(size = 20),
 # now validate against unseen neuro 
 pred <- predict(model, as.matrix(data_neuro[,1:10]))
 pred <- round(pred) # round to 0/1 for binary classification (no stress vs. stress)
-print(sum(as.numeric(data_neuro$metric == pred))/nrow(data_neuro)) # 52%
+print(sum(as.numeric(data_neuro$metric == pred))/nrow(data_neuro)) # 50%
 
 # precision, recall, F1 score
-precision <- posPredValue(as.factor(pred), as.factor(data_neuro$metric), positive="1") # 0.64
-recall <- sensitivity(as.factor(pred), as.factor(data_neuro$metric), positive="1") # 0.23
-F1 <- (2 * precision * recall) / (precision + recall) # 0.34
+precision <- posPredValue(as.factor(pred), as.factor(data_neuro$metric), positive="1") # 0.53
+recall <- sensitivity(as.factor(pred), as.factor(data_neuro$metric), positive="1") # 0.24
+F1 <- (2 * precision * recall) / (precision + recall) # 0.33
 
 # validate against wesad
 
 pred <- predict(model, as.matrix(data_wesad[,1:10]))
 pred <- round(pred) # round to 0/1 for binary classification (no stress vs. stress)
-print(sum(as.numeric(data_wesad$metric == pred))/nrow(data_wesad)) # 70%
+print(sum(as.numeric(data_wesad$metric == pred))/nrow(data_wesad)) # 68%
 
 # precision, recall, F1 score
-precision <- posPredValue(as.factor(pred), as.factor(data_wesad$metric), positive="1") # 0.27
-recall <- sensitivity(as.factor(pred), as.factor(data_wesad$metric), positive="1") # 0.17
-F1 <- (2 * precision * recall) / (precision + recall) # 0.20
+precision <- posPredValue(as.factor(pred), as.factor(data_wesad$metric), positive="1") # 0.36
+recall <- sensitivity(as.factor(pred), as.factor(data_wesad$metric), positive="1") # 0.59
+F1 <- (2 * precision * recall) / (precision + recall) # 0.45
 
