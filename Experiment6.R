@@ -84,7 +84,7 @@ params <- list(
   subsample = 0.70,
   colsample_bytree = 0.8
 )
-dtrain <- xgb.DMatrix(data = as.matrix(data[,1:10]), label = data$metric)
+dtrain <- xgb.DMatrix(data = as.matrix(train[,1:10]), label = train$metric)
 dtest <- xgb.DMatrix(data = as.matrix(test[,1:10]), label = test$metric)
 watchlist <- list(train = dtrain, test = dtest)
 
@@ -98,7 +98,7 @@ model_xgb <- xgb.train(
   verbose = 1
 )
 
-# [127]	train-rmse:0.025715	test-rmse:0.024722
+# [151]	train-rmse:0.025898	test-rmse:0.026284
 
 #########################################################################################################################################################
 # Build Neural Network Model
@@ -147,7 +147,7 @@ history <- fit(
   callbacks        = list(callback_early_stopping(monitor = "val_loss", patience = 5, restore_best_weights = TRUE))
 )
 
-# 360/360 [==============================] - 1s 2ms/step - loss: 0.1240 - val_loss: 0.1237
+# 360/360 [==============================] - 1s 2ms/step - loss: 0.1220 - val_loss: 0.1217
 
 rm(data, history, params, test, train, train.index, watchlist, x_test, dtest, dtrain, scale_pos_weight, y_test, y_train)
 gc()
@@ -158,9 +158,11 @@ gc()
 
 exam_data <- stresshelpers::make_exam_data('EXAM')
 exam_data <- exam_data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject)
+exam_data <- exam_data[exam_data$Subject %in% c("S1_Final", "S10_Final"),]
+gc()
 
 # ensemble weighting
-weighted <- function(xgb, ann) (xgb*0.55) + (ann*0.45)
+weighted <- function(xgb, ann) (xgb*0.7) + (ann*0.3)
 
 temp <- exam_data[exam_data$Subject=='S1_Final',]
 x_val <- temp[,1:10]
@@ -175,10 +177,9 @@ temp <- as.data.frame(temp)
 names(temp) <- c("xgb","ann","ens")
 temp$ID <- seq.int(nrow(temp))
 ggplot(temp, aes(x=ID)) + 
-  geom_smooth(aes(x=ID, y=ens), method = lm, formula = y ~ splines::bs(x, 14), se = FALSE)+
   geom_line(aes(y = ens, colour="ENS"),  size=1,  alpha=0.4) + 
-  scale_color_manual(values=c("#0f5875","#b24228", "#24844c")) + 
-  scale_fill_manual(values=c("#0f5875","#b24228", "#24844c")) + 
+  scale_color_manual(values=c("#0080ff","#FF6666")) + 
+  scale_fill_manual(values=c("#0080ff","#FF6666")) + 
   labs(colour="Model") + 
   guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
   theme_classic() + ylab('Stress - S1 (Final)') + xlab('Time (seconds)') + 
@@ -204,10 +205,9 @@ temp <- as.data.frame(temp)
 names(temp) <- c("xgb","ann","ens")
 temp$ID <- seq.int(nrow(temp))
 ggplot(temp, aes(x=ID)) + 
-  geom_smooth(aes(x=ID, y=ens), method = lm, formula = y ~ splines::bs(x, 14), se = FALSE)+
   geom_line(aes(y = ens, colour="ENS"),  size=1,  alpha=0.4) + 
-  scale_color_manual(values=c("#0f5875","#b24228", "#24844c")) + 
-  scale_fill_manual(values=c("#0f5875","#b24228", "#24844c")) + 
+  scale_color_manual(values=c("#0080ff","#FF6666")) + 
+  scale_fill_manual(values=c("#0080ff","#FF6666")) + 
   labs(colour="Model") + 
   guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
   theme_classic() + ylab('Stress - S10 (Final)') + xlab('Time (seconds)') + 

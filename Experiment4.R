@@ -97,53 +97,68 @@ hyper_grid %>%
   glimpse()
 
 #########################################################################################################################################################
-# Model training - xgboost using optimal parameters
+# Model training - xgboost using optimal parameters validation using LOSO
 #########################################################################################################################################################
-split.index <- createDataPartition(data$Subject, p = .9, list = FALSE) # 90% of StressData for training
-train <- data[split.index,]
-val <- data[-split.index,] # 10% for validation
-
-
-train.index <- createDataPartition(train$Subject, p = .7, list = FALSE) # 70/30 train/test split along subjects
-train <- train[train.index,]
-test <- train[-train.index,]
-
-# class balancing
-scale_pos_weight = nrow(train[train$metric==0,])/nrow(train[train$metric==1,])
+subjects <- unique(data$Subject)
+index <- 1
+results <- NULL
 
 # found using hyper parameter search
 params <- list(
-  eta = 0.5, 
+  eta = 0.50, 
   max_depth = 8, 
-  subsample = 0.7,#0.35,
-  colsample_bytree = 0.8
+  subsample = 0.70,
+  colsample_bytree = 0.4
 )
 
-dtrain <- xgb.DMatrix(data = as.matrix(train[,1:10]), label = train$metric)
-dtest <- xgb.DMatrix(data = as.matrix(test[,1:10]), label = test$metric)
-watchlist <- list(train = dtrain, test = dtest)
+for (subject in subjects)
+{
+  val <- data[data$Subject == subject,]
+  temp <- data[!(data$Subject == subject),]
+  
+  train.index <- createDataPartition(temp$metric, p = .7, list = FALSE) # 70/30 train/test split along subject
+  train <- temp[train.index,]
+  test <- temp[-train.index,]
+  
+  # class balancing
+  scale_pos_weight = nrow(train[train$metric==0,])/nrow(train[train$metric==1,])
+  
+  dtrain <- xgb.DMatrix(data = as.matrix(train[,1:10]), label = train$metric)
+  dtest <- xgb.DMatrix(data = as.matrix(test[,1:10]), label = test$metric)
+  watchlist <- list(train = dtrain, test = dtest)
+  
+  model_xgb <- xgb.train(
+    params = params,
+    data = dtrain,
+    objective = "reg:logistic",
+    watchlist = watchlist,
+    nrounds = 500,
+    early_stopping_rounds = 3,
+    scale_pos_weight = scale_pos_weight,
+    verbose = 0
+  )
+  
+  x_val <- val[,1:10]
+  yhat_xgb <- predict(model_xgb, as.matrix(x_val))
+  yhat_xgb <- round(yhat_xgb)
+  acc_xgb <- sum(as.numeric(val$metric == yhat_xgb))/nrow(val)
+  
+  # precision, recall, F1 score
+  precision <- posPredValue(factor(yhat_xgb, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
+  recall <- sensitivity(factor(yhat_xgb, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
+  F1 <- (2 * precision * recall) / (precision + recall)
+  
+  res <- cbind(subject, acc_xgb, precision, recall, F1)
+  res <- as.data.frame(res)
+  names(res) <- c("SUBJECT","XGB", "PRECISION", "RECALL", "F1")
+  results <- rbind(results, res)
+}
 
-model <- xgb.train(
-  params = params,
-  data = dtrain,
-  objective = "reg:logistic",
-  watchlist = watchlist,
-  nrounds = 5000,
-  early_stopping_rounds = 3,
-  verbose = 1,
-  scale_pos_weight = scale_pos_weight
-)
-
-# Best iteration:
-# [133]	train-rmse:0.026422	test-rmse:0.026493
-
-pred <- predict(model, as.matrix(val[,1:10]))
-pred <- round(pred) # round to 0/1 for binary classification (no stress vs. stress)
-print(sum(as.numeric(val$metric == pred))/nrow(val)) # 99.90% on hold-out set
-
-# precision, recall, F1 score
-precision <- posPredValue(as.factor(pred), as.factor(val$metric), positive="1") # 0.99
-recall <- sensitivity(as.factor(pred), as.factor(val$metric), positive="1") # 0.99
-F1 <- (2 * precision * recall) / (precision + recall) # 0.99
-
-#########################################################################################################################################################
+results$XGB <- as.numeric(results$XGB)
+results$PRECISION <- as.numeric(results$PRECISION)
+results$RECALL <- as.numeric(results$RECALL)
+results$F1 <- as.numeric(results$F1)
+print(mean(results$XGB, na.rm=TRUE)) # 0.723612
+print(mean(results$PRECISION, na.rm=TRUE)) # 0.4698785
+print(mean(results$RECALL, na.rm=TRUE)) # 0.6568417
+print(mean(results$F1, na.rm=TRUE)) # 0.4655333

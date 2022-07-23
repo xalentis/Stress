@@ -43,9 +43,12 @@ library(zoo)
 library(e1071)
 library(stresshelpers)
 library(keras)
+library(tensorflow)
 
 options(scipen=999)
 set.seed(123)
+tensorflow::set_random_seed(123)
+
 
 #########################################################################################################################################################
 # Load and Prep StressData for Training
@@ -53,23 +56,30 @@ set.seed(123)
 data_neuro <- stresshelpers::make_neuro_data('NEURO', feature_engineering = TRUE)
 data_swell <- stresshelpers::make_swell_data('SWELL', feature_engineering = TRUE)
 data_wesad <- stresshelpers::make_wesad_data('WESAD', feature_engineering = TRUE)
-data_ubfc  <-  stresshelpers::make_ubfc_data('UBFC',  feature_engineering = TRUE)
-data <- rbind(data_neuro, data_swell, data_wesad, data_ubfc) # 99 subjects
+data_ubfc  <- stresshelpers::make_ubfc_data('UBFC',  feature_engineering = TRUE)
 
-data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
+# balancing across data sources for XGB
+data_neuro$Balance <- 0
+data_swell$Balance <- 0
+data_wesad$Balance <- 0
+data_ubfc$Balance <- 1
+
+data <- rbind(data_neuro, data_swell, data_wesad, data_ubfc) # 99 subjects
+data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric, Balance)
 
 rm(data_neuro, data_swell, data_wesad, data_ubfc)
 gc()
 
 #########################################################################################################################################################
-# Model training - xgboost using optimal parameters
+# Model training - xgboost using optimal parameters with LOSO
 #########################################################################################################################################################
-train.index <- createDataPartition(data$Subject, p = .7, list = FALSE) # 70/30 train/test split along subjects
-train <- data[train.index,]
-test <- data[-train.index,]
+subjects <- unique(data$Subject)
+index <- 1
+results <- NULL
 
-# class balancing
-scale_pos_weight = nrow(train[train$metric==0,])/nrow(train[train$metric==1,])
+# ensemble weighting
+weighted_long <- function(xgb, ann) (xgb*0.4) + (ann*0.6)
+weighted_short <- function(xgb, ann) (xgb*0.7) + (ann*0.3)
 
 # found using hyper parameter search
 params <- list(
@@ -78,7 +88,171 @@ params <- list(
   subsample = 0.70,
   colsample_bytree = 0.8
 )
-dtrain <- xgb.DMatrix(data = as.matrix(data[,1:10]), label = data$metric)
+
+for (subject in subjects)
+{
+  val <- data[data$Subject == subject,]
+  temp <- data[!(data$Subject == subject),]
+  
+  train.index <- createDataPartition(temp$metric, p = .7, list = FALSE) # 70/30 train/test split along subject
+  train <- temp[train.index,]
+  test <- temp[-train.index,]
+  
+  # class balancing
+  scale_pos_weight = nrow(train[train$Balance==0,])/nrow(train[train$Balance==1,])
+  
+  dtrain <- xgb.DMatrix(data = as.matrix(train[,1:10]), label = train$metric)
+  dtest <- xgb.DMatrix(data = as.matrix(test[,1:10]), label = test$metric)
+  watchlist <- list(train = dtrain, test = dtest)
+  
+  model_xgb <- xgb.train(
+    params = params,
+    data = dtrain,
+    objective = "reg:logistic",
+    watchlist = watchlist,
+    nrounds = 500,
+    early_stopping_rounds = 3,
+    scale_pos_weight = scale_pos_weight,
+    verbose = 0
+  )
+  
+  x_train <- train[,1:10]
+  y_train <- train$metric
+  x_test <- test[,1:10]
+  y_test <- test$metric
+  
+  # scale
+  x_train <- scale(x_train)
+  x_test <- scale(x_test, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
+  
+  model_nn <- keras_model_sequential()
+  
+  model_nn %>% 
+    layer_dense(
+      units              = 10, 
+      kernel_initializer = "normal", 
+      activation         = "relu", 
+      input_shape        = ncol(x_train)) %>% 
+    
+    layer_dense(
+      units              = 4, 
+      kernel_initializer = "normal", 
+      activation         = "relu") %>% 
+    
+    layer_dense(
+      units              = 1, 
+      kernel_initializer = "normal",
+      activation         = "linear") %>%
+    
+    compile(
+      loss = "mse",
+      optimizer = optimizer_adamax()
+    )
+  
+  history <- fit(
+    object           = model_nn, 
+    x                = x_train, 
+    y                = y_train,
+    batch_size       = 512, 
+    epochs           = 120,
+    validation_data  = list(x_test, y_test),
+    shuffle          = TRUE,
+    callbacks        = list(callback_early_stopping(monitor = "val_loss", patience = 3, restore_best_weights = TRUE)),
+    verbose          = 0
+  )
+  
+  x_val <- val[,1:10]
+  yhat_xgb <- predict(model_xgb, as.matrix(x_val))
+  x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
+  yhat_nn <- as.data.frame(predict(model_nn, x_val))
+  yhat_nn <- yhat_nn[,1]
+  yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
+  yhat_xgb <- round(yhat_xgb)
+  yhat_nn <- round(yhat_nn)
+  
+  if (nrow(val) < 1000)
+  {
+    yhat_ens <- weighted_short(yhat_xgb, yhat_nn)
+  }
+  else
+  {
+    yhat_ens <- weighted_long(yhat_xgb, yhat_nn)
+  }
+  
+  yhat_ens <- round(yhat_ens)
+  acc_xgb <- sum(as.numeric(val$metric == yhat_xgb))/nrow(val)
+  acc_ann <- sum(as.numeric(val$metric == yhat_nn))/nrow(val)
+  acc_ens <- sum(as.numeric(val$metric == yhat_ens))/nrow(val)
+  
+  # precision, recall, F1 score
+  precision <- posPredValue(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
+  recall <- sensitivity(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
+  F1 <- (2 * precision * recall) / (precision + recall)
+  
+  res <- cbind(subject, acc_xgb, acc_ann, acc_ens, precision, recall, F1)
+  res <- as.data.frame(res)
+  names(res) <- c("SUBJECT","XGB","ANN","ENS", "PRECISION", "RECALL", "F1")
+  results <- rbind(results, res)
+  index <- index + 1
+}
+
+
+results$XGB <- as.numeric(results$XGB)
+results$ANN <- as.numeric(results$ANN)
+results$ENS <- as.numeric(results$ENS)
+results$PRECISION <- as.numeric(results$PRECISION)
+results$RECALL <- as.numeric(results$RECALL)
+results$F1 <- as.numeric(results$F1)
+
+print(mean(results$XGB, na.rm=TRUE)) # 0.7865308
+print(mean(results$ANN, na.rm=TRUE)) # 0.5523054
+print(mean(results$ENS, na.rm=TRUE)) # 0.8033597
+print(mean(results$PRECISION, na.rm=TRUE)) # 0.5637483
+print(mean(results$RECALL, na.rm=TRUE)) # 0.752046
+print(mean(results$F1, na.rm=TRUE)) # 0.468201
+
+#########################################################################################################################################################
+# Test
+#########################################################################################################################################################
+data_neuro <- stresshelpers::make_neuro_data('NEURO', feature_engineering = TRUE)
+data_swell <- stresshelpers::make_swell_data('SWELL', feature_engineering = TRUE)
+data_wesad <- stresshelpers::make_wesad_data('WESAD', feature_engineering = TRUE)
+data_ubfc  <- stresshelpers::make_ubfc_data('UBFC',  feature_engineering = TRUE)
+
+# balancing across data sources for XGB
+data_neuro$Balance <- 0
+data_swell$Balance <- 0
+data_wesad$Balance <- 0
+data_ubfc$Balance <- 1
+
+data <- rbind(data_neuro, data_swell, data_wesad, data_ubfc) # 99 subjects
+data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric, Balance)
+
+val <- data[(data$Subject %in% c("S9","W14","N13")),]
+data <- data[!(data$Subject %in% c("S9","W14","N13")),]
+
+rm(data_neuro, data_swell, data_wesad, data_ubfc)
+gc()
+
+# ensemble weighting
+weighted_long <- function(xgb, ann) (xgb*0.4) + (ann*0.6)
+
+# found using hyper parameter search
+params <- list(
+  eta = 0.5, 
+  max_depth = 8, 
+  subsample = 0.70,
+  colsample_bytree = 0.8
+)
+
+train.index <- createDataPartition(data$metric, p = .7, list = FALSE) # 70/30 train/test split along subject
+train <- data[train.index,]
+test <- data[-train.index,]
+
+# class balancing
+scale_pos_weight = nrow(train[train$Balance==0,])/nrow(train[train$Balance==1,])
+
+dtrain <- xgb.DMatrix(data = as.matrix(train[,1:10]), label = train$metric)
 dtest <- xgb.DMatrix(data = as.matrix(test[,1:10]), label = test$metric)
 watchlist <- list(train = dtrain, test = dtest)
 
@@ -87,16 +261,12 @@ model_xgb <- xgb.train(
   data = dtrain,
   objective = "reg:logistic",
   watchlist = watchlist,
-  nrounds = 5000,
+  nrounds = 500,
   early_stopping_rounds = 3,
-  verbose = 1
+  scale_pos_weight = scale_pos_weight,
+  verbose = 0
 )
 
-# [127]	train-rmse:0.025715	test-rmse:0.024722
-
-#########################################################################################################################################################
-# Build Neural Network Model
-#########################################################################################################################################################
 x_train <- train[,1:10]
 y_train <- train$metric
 x_test <- test[,1:10]
@@ -116,7 +286,7 @@ model_nn %>%
     input_shape        = ncol(x_train)) %>% 
   
   layer_dense(
-    units              = 5, 
+    units              = 4, 
     kernel_initializer = "normal", 
     activation         = "relu") %>% 
   
@@ -138,48 +308,88 @@ history <- fit(
   epochs           = 120,
   validation_data  = list(x_test, y_test),
   shuffle          = TRUE,
-  callbacks        = list(callback_early_stopping(monitor = "val_loss", patience = 5, restore_best_weights = TRUE))
+  callbacks        = list(callback_early_stopping(monitor = "val_loss", patience = 3, restore_best_weights = TRUE)),
+  verbose          = 0
 )
 
-# 360/360 [==============================] - 1s 2ms/step - loss: 0.1253 - val_loss: 0.1242
 
-#########################################################################################################################################################
-# Test on unseen TOADSTOOL data - no metric or label available
-#########################################################################################################################################################
-weighted <- function(xgb, ann) (xgb*55) + (ann*45)
-
-data_toadstool <- stresshelpers::make_toadstool_data('TOADSTOOL')
-data_toadstool <- data_toadstool %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject)
-
-x_val <- data_toadstool[,1:10]
-
-# predict using XGB
+temp <- val[val$Subject=='S9',]
+x_val <- temp[,1:10]
 yhat_xgb <- predict(model_xgb, as.matrix(x_val))
-
-# predict using ANN
-x_val <- scale(x_val)
+x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
 yhat_nn <- as.data.frame(predict(model_nn, x_val))
 yhat_nn <- yhat_nn[,1]
-# scale between 0 and 1
 yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
-
-# ensemble
-val <- data_toadstool
-val$yhat_nn <- yhat_nn
-val$yhat_xgb <- yhat_xgb
-val$ensemble <- weighted(val$yhat_xgb , val$yhat_nn) 
-
-# plot subject T2
-temp <- val[val$Subject=="T2",]
+yhat_ens <- weighted_long(yhat_xgb, yhat_nn)
+temp <- cbind(yhat_xgb, yhat_nn, yhat_ens, temp$metric)
+temp <- as.data.frame(temp)
+names(temp) <- c("xgb","ann","ens","metric")
 temp$ID <- seq.int(nrow(temp))
 ggplot(temp, aes(x=ID)) + 
-  geom_line(aes(y = ensemble, colour="Ensemble"),  size=1) + 
-  scale_color_manual(values=c("#b24228")) + 
-  scale_fill_manual(values=c("#b24228")) + 
+  geom_area(aes(y = metric, colour="STRESS"), fill="#FF6666",  alpha=0.4, size=0.5) + 
+  geom_line(aes(y = ens, colour="ENS"), size=1) + 
+  scale_color_manual(values=c("#0080ff","#FF6666")) + 
+  scale_fill_manual(values=c("#0080ff","#FF6666")) + 
   labs(colour="Model") + 
   guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
-  theme_classic() + ylab('Stress - T2') + xlab('Time (seconds)') + 
-  scale_x_continuous(breaks=seq(0,nrow(temp)+360,360)) +
+  theme_classic() + ylab('Stress - S9') + xlab('Time (seconds)') + 
+  scale_x_continuous(breaks=seq(0,nrow(temp)+1200,1200)) +
+  theme(axis.title = element_text(size = 20, family="Times New Roman",face="bold")) +
+  theme(axis.text=element_text(size=14, family="Times New Roman",face="bold")) +
+  theme(plot.title = element_text(family="Times New Roman",face="bold")) +
+  theme(legend.text = element_text(family="Times New Roman",face="bold", size=14)) +
+  theme(legend.title =  element_text(family="Times New Roman",face="bold", size=14))
+
+
+temp <- val[val$Subject=='W14',]
+x_val <- temp[,1:10]
+yhat_xgb <- predict(model_xgb, as.matrix(x_val))
+x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
+yhat_nn <- as.data.frame(predict(model_nn, x_val))
+yhat_nn <- yhat_nn[,1]
+yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
+yhat_ens <- weighted_long(yhat_xgb, yhat_nn)
+temp <- cbind(yhat_xgb, yhat_nn, yhat_ens, temp$metric)
+temp <- as.data.frame(temp)
+names(temp) <- c("xgb","ann","ens","metric")
+temp$ID <- seq.int(nrow(temp))
+ggplot(temp, aes(x=ID)) + 
+  geom_line(aes(y = ens, colour="ENS"),  size=1) + 
+  geom_area(aes(y = metric, colour="STRESS"), fill="#FF6666",  alpha=0.4, size=0.5) + 
+  scale_color_manual(values=c("#0080ff","#FF6666")) + 
+  scale_fill_manual(values=c("#0080ff","#FF6666")) + 
+  labs(colour="Model") + 
+  guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
+  theme_classic() + ylab('Stress - W14') + xlab('Time (seconds)') + 
+  scale_x_continuous(breaks=seq(0,nrow(temp)+1200,1200)) +
+  theme(axis.title = element_text(size = 20, family="Times New Roman",face="bold")) +
+  theme(axis.text=element_text(size=14, family="Times New Roman",face="bold")) +
+  theme(plot.title = element_text(family="Times New Roman",face="bold")) +
+  theme(legend.text = element_text(family="Times New Roman",face="bold", size=14)) +
+  theme(legend.title =  element_text(family="Times New Roman",face="bold", size=14))
+
+
+temp <- val[val$Subject=='N13',]
+x_val <- temp[,1:10]
+yhat_xgb <- predict(model_xgb, as.matrix(x_val))
+x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
+yhat_nn <- as.data.frame(predict(model_nn, x_val))
+yhat_nn <- yhat_nn[,1]
+yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
+yhat_ens <- weighted(yhat_xgb, yhat_nn)
+temp <- cbind(yhat_xgb, yhat_nn, yhat_ens, temp$metric)
+temp <- as.data.frame(temp)
+names(temp) <- c("xgb","ann","ens","metric")
+temp$ID <- seq.int(nrow(temp))
+ggplot(temp, aes(x=ID)) + 
+  geom_line(aes(y = ens, colour="ENS"), size=1) + 
+  geom_area(aes(y = metric, colour="STRESS"), fill="#FF6666",  alpha=0.4, size=0.5) + 
+  scale_color_manual(values=c("#0080ff","#FF6666")) + 
+  scale_fill_manual(values=c("#0080ff","#FF6666")) + 
+  labs(colour="Model") + 
+  guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
+  theme_classic() + ylab('Stress - N13') + xlab('Time (seconds)') + 
+  scale_x_continuous(breaks=seq(0,nrow(temp)+1200,1200)) +
   theme(axis.title = element_text(size = 20, family="Times New Roman",face="bold")) +
   theme(axis.text=element_text(size=14, family="Times New Roman",face="bold")) +
   theme(plot.title = element_text(family="Times New Roman",face="bold")) +

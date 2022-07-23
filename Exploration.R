@@ -200,16 +200,14 @@ swell_expanded <- stresshelpers::make_swell_data('SWELL', feature_engineering = 
 wesad_expanded <- stresshelpers::make_wesad_data('WESAD', feature_engineering = TRUE)
 ubfc_expanded <-  stresshelpers::make_ubfc_data('UBFC', feature_engineering = TRUE)
 
-# correlation - no difference
-names(neuro_expanded) <- c("EDA","HR","STRESS","Subject")
-names(ubfc_expanded) <- c("EDA","HR","STRESS","Subject")
-names(swell_expanded) <- c("EDA","HR","STRESS","Subject")
-names(wesad_expanded) <- c("EDA","HR","STRESS","Subject")
-col <- colorRampPalette(c("red", "white","navy"))(10)
-corrplot(cor(swell_expanded[,c("EDA","HR","STRESS")], method="spearman"), method="color", title="",addCoef.col = 'black', number.cex = 1.7,tl.cex=1.5,tl.col = "black", col=col, cl.cex=1.5, cl.ratio = 0.5)
-corrplot(cor(wesad_expanded[,c("EDA","HR","STRESS")], method="spearman"), method="color", title="",addCoef.col = 'black', number.cex = 1.7,tl.cex=1.5,tl.col = "black", col=col, cl.cex=1.5, cl.ratio = 0.5)
-corrplot(cor(ubfc_expanded[,c("EDA","HR","STRESS")], method="spearman"), method="color", title="",addCoef.col = 'black', number.cex = 1.7,tl.cex=1.5,tl.col = "black", col=col, cl.cex=1.5, cl.ratio = 0.5)
-corrplot(cor(neuro_expanded[,c("EDA","HR","STRESS")], method="spearman"), method="color", title="",addCoef.col = 'black', number.cex = 1.7,tl.cex=1.5,tl.col = "black", col=col, cl.cex=1.5, cl.ratio = 0.5)
+neuro_expanded$Subject<- NULL
+ubfc_expanded$Subject<- NULL
+swell_expanded$Subject<- NULL
+wesad_expanded$Subject<- NULL
+corrplot(cor(neuro_expanded, method="spearman"), method="color", title="",addCoef.col = 'black', number.cex = 1,tl.cex=1,tl.col = "black", col=col, cl.cex=1, cl.ratio = 0.5)
+corrplot(cor(ubfc_expanded, method="spearman"), method="color", title="",addCoef.col = 'black', number.cex = 1,tl.cex=1,tl.col = "black", col=col, cl.cex=1, cl.ratio = 0.5)
+corrplot(cor(swell_expanded, method="spearman"), method="color", title="",addCoef.col = 'black', number.cex = 1,tl.cex=1,tl.col = "black", col=col, cl.cex=1, cl.ratio = 0.5)
+corrplot(cor(wesad_expanded, method="spearman"), method="color", title="",addCoef.col = 'black', number.cex = 1,tl.cex=1,tl.col = "black", col=col, cl.cex=1, cl.ratio = 0.5)
 
 # reload data for boxplots to fix names
 neuro_expanded <- stresshelpers::make_neuro_data('NEURO', feature_engineering = TRUE)
@@ -253,8 +251,6 @@ data<- subset(data, data$eda > (Q[1] - 1.5*iqr) & data$eda < (Q[2]+1.5*iqr))
 Q <- quantile(data$hr, probs=c(.25, .75), na.rm = FALSE)
 iqr <- IQR(data$hr)
 data<- subset(data, data$hr > (Q[1] - 1.5*iqr) & data$hr < (Q[2]+1.5*iqr))
-
-print(dfSummary(data), method = 'pander', file='merged_expanded.html')
 
 # Compute the analysis of variance
 res.aov <- aov(edarange + hrmax ~ metric, data = data)

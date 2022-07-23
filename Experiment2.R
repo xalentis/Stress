@@ -153,8 +153,7 @@ precision <- posPredValue(as.factor(pred), as.factor(data_neuro$metric), positiv
 recall <- sensitivity(as.factor(pred), as.factor(data_neuro$metric), positive="1") # 0.24
 F1 <- (2 * precision * recall) / (precision + recall) # 0.33
 
-# validate against wesad
-
+# validate against unseen wesad
 pred <- predict(model, as.matrix(data_wesad[,1:10]))
 pred <- round(pred) # round to 0/1 for binary classification (no stress vs. stress)
 print(sum(as.numeric(data_wesad$metric == pred))/nrow(data_wesad)) # 68%
