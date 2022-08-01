@@ -407,9 +407,40 @@ rolling_features <- function(data, window_size)
 #' Loads Exam Data Set
 #'
 #' @param folder Folder containing the data
-#' @return Data frame of UBFC data set
+#' @return Data frame of EXAM data set
 #' @export
 make_exam_data <- function(folder) {
+  subjects <- c("S1","S2","S3","S4","S5","S6","S7","S8","S9","S10")
+  data <- NULL
+
+  for (subject in subjects)
+  {
+    subject_file <- stresshelpers::read.empatica(paste(folder, "/",subject,"/Final",sep=""))
+    hr <- subject_file$signal$hr$data
+    eda <- subject_file$signal$eda$data
+    eda <- eda[2:(length(eda)-1)]
+    hr <- hr[2:(length(hr)-1)]
+    eda <- eda[1:10800] # 3 hour exam
+    hr <- hr[1:10800]# 3 hour exam
+    eda <- stresshelpers::downsample(eda, round(length(eda) / length(hr)))
+    shortest <- min(length(eda), length(hr))
+    hr <- hr[1:shortest]
+    eda <- eda[1:shortest]
+    dataset <- cbind(eda, hr)
+    dataset <- as.data.frame(dataset)
+    dataset <- stresshelpers::rolling_features(dataset, 25)
+    dataset$Subject <- paste(subject,"Final",sep='_')
+    data <- rbind(data, dataset)
+  }
+  return (data)
+}
+
+#' Loads Exam Data Set with all exams
+#'
+#' @param folder Folder containing the data
+#' @return Data frame of EXAM data set
+#' @export
+make_exam_data_full <- function(folder) {
   subjects <- c("S1","S2","S3","S4","S5","S6","S7","S8","S9","S10")
   data <- NULL
 
@@ -426,7 +457,6 @@ make_exam_data <- function(folder) {
     eda <- eda[1:shortest]
     dataset <- cbind(eda, hr)
     dataset <- as.data.frame(dataset)
-    dataset <- stresshelpers::rolling_features(dataset, 25)
     dataset$Subject <- paste(subject,"Midterm1",sep='_')
     data <- rbind(data, dataset)
 
@@ -441,7 +471,6 @@ make_exam_data <- function(folder) {
     eda <- eda[1:shortest]
     dataset <- cbind(eda, hr)
     dataset <- as.data.frame(dataset)
-    dataset <- stresshelpers::rolling_features(dataset, 25)
     dataset$Subject <- paste(subject,"Midterm2",sep='_')
     data <- rbind(data, dataset)
 
@@ -456,12 +485,13 @@ make_exam_data <- function(folder) {
     eda <- eda[1:shortest]
     dataset <- cbind(eda, hr)
     dataset <- as.data.frame(dataset)
-    dataset <- stresshelpers::rolling_features(dataset, 25)
     dataset$Subject <- paste(subject,"Final",sep='_')
     data <- rbind(data, dataset)
   }
+  data$metric <- 1
   return (data)
 }
+
 
 #' Loads UBFC Data Set
 #'
@@ -558,6 +588,7 @@ make_neuro_data <- function(folder, feature_engineering = FALSE)
     temp[1020:1140,"metric"] <- 5 # cooldown after stress
     temp[1380:1500,"metric"] <- 5 # stress anticipation
     temp <- as.data.frame(temp)
+    temp <- na.omit(temp)
     if (feature_engineering == TRUE)
     {
       temp <- rolling_features(temp, 25)
@@ -607,7 +638,7 @@ make_wesad_data <- function(folder, feature_engineering = FALSE)
       if (substr(names(metrics)[index],1,4) == 'Base') metric[start:end] <- 0
       if (substr(names(metrics)[index],1,4) == 'TSST') metric[start:end] <- 1
       if (substr(names(metrics)[index],1,3) == 'Fun') metric[start:end] <- 0
-      if (substr(names(metrics)[index],1,4) == 'Medi') metric[start:end] <- 0
+      if (substr(names(metrics)[index],1,4) == 'Medi') metric[start:end] <- NA
     }
     hr <- wesad$signal$hr$data # 1Hz, each entry is 10 seconds
     eda <- downsample(wesad$signal$eda$data, eda_sampling_rate)
