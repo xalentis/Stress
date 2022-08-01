@@ -226,7 +226,7 @@ data %>%
   scale_fill_nejm() + 
   theme_light() +
   labs(y = "EDA\n") + 
-  labs(x = "\nSubjects") +
+  labs(x = "\Dataset") +
   theme(legend.position="none") +
   theme(axis.title = element_text(size = 20, family="Times New Roman",face="bold")) +
   theme(axis.text=element_text(size=12, family="Times New Roman",face="bold")) +
@@ -238,7 +238,7 @@ data %>%
   scale_fill_nejm() + 
   theme_light() +
   labs(y = "HR\n") + 
-  labs(x = "\nSubjects") +
+  labs(x = "\Dataset") +
   theme(legend.position="none") +
   theme(axis.title = element_text(size = 20, family="Times New Roman",face="bold")) +
   theme(axis.text=element_text(size=12, family="Times New Roman",face="bold")) +

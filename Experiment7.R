@@ -1,4 +1,4 @@
-# Experiment 5
+# Experiment 7
 
 # Investigating Wearable Sensor Biomarkers for Chronic Stress Measurement and Analysis
 # Gideon Vos, Master of Philosophy, James Cook University, 2022
@@ -43,6 +43,7 @@ library(zoo)
 library(e1071)
 library(stresshelpers)
 library(keras)
+library(TTR)
 
 options(scipen=999)
 set.seed(123)
@@ -54,9 +55,15 @@ data_neuro <- stresshelpers::make_neuro_data('NEURO', feature_engineering = TRUE
 data_swell <- stresshelpers::make_swell_data('SWELL', feature_engineering = TRUE)
 data_wesad <- stresshelpers::make_wesad_data('WESAD', feature_engineering = TRUE)
 data_ubfc  <-  stresshelpers::make_ubfc_data('UBFC',  feature_engineering = TRUE)
-data <- rbind(data_neuro, data_swell, data_wesad, data_ubfc) # 99 subjects
 
-data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
+# balancing across data sources: XGB
+data_neuro$Balance <- 1
+data_swell$Balance <- 1
+data_wesad$Balance <- 1
+data_ubfc$Balance <- 0
+
+data <- rbind(data_neuro, data_swell, data_wesad, data_ubfc) # 99 subjects
+data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric, Balance)
 
 rm(data_neuro, data_swell, data_wesad, data_ubfc)
 gc()
@@ -69,7 +76,7 @@ train <- data[train.index,]
 test <- data[-train.index,]
 
 # class balancing
-scale_pos_weight = nrow(train[train$metric==0,])/nrow(train[train$metric==1,])
+scale_pos_weight = nrow(train[train$Balance==0,])/nrow(train[train$Balance==1,])
 
 # found using hyper parameter search
 params <- list(
@@ -89,10 +96,11 @@ model_xgb <- xgb.train(
   watchlist = watchlist,
   nrounds = 5000,
   early_stopping_rounds = 3,
-  verbose = 1
+  verbose = 1,
+  scale_pos_weight = scale_pos_weight
 )
 
-# [151]	train-rmse:0.025898	test-rmse:0.026284
+# [155]	train-rmse:0.032527	test-rmse:0.035476
 
 #########################################################################################################################################################
 # Build Neural Network Model
@@ -141,16 +149,17 @@ history <- fit(
   callbacks        = list(callback_early_stopping(monitor = "val_loss", patience = 5, restore_best_weights = TRUE))
 )
 
-# 360/360 [==============================] - 1s 2ms/step - loss: 0.1149 - val_loss: 0.1149
+# 337/337 [==============================] - 1s 2ms/step - loss: 0.1398 - val_loss: 0.1393
 
 #########################################################################################################################################################
 # Test on unseen TOADSTOOL data - no metric or label available
 #########################################################################################################################################################
-weighted <- function(xgb, ann) (xgb*0.4) + (ann*0.6)
 
 data_toadstool <- stresshelpers::make_toadstool_data('TOADSTOOL')
 data_toadstool <- data_toadstool %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject)
+data_toadstool <- data_toadstool[data_toadstool$Subject=="T2",]
 
+weighted <- function(xgb, ann) (xgb*0.5) + (ann*0.5)
 x_val <- data_toadstool[,1:10]
 
 # predict using XGB
@@ -173,16 +182,19 @@ val$ensemble <- weighted(val$yhat_xgb , val$yhat_nn)
 temp <- val[val$Subject=="T2",]
 temp$ID <- seq.int(nrow(temp))
 ggplot(temp, aes(x=ID)) + 
-  geom_line(aes(y = ensemble, colour="Ensemble"),  size=1) + 
-  scale_color_manual(values=c("#0080ff")) + 
-  scale_fill_manual(values=c("#0080ff")) + 
+  geom_line(aes(y = runMean(ensemble, 60) , colour="ENS"), size=0.5) + 
+  scale_color_lancet() + scale_fill_lancet() +
   labs(colour="Model") + 
   guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
   theme_classic() + ylab('Stress - T2') + xlab('Time (seconds)') + 
   scale_x_continuous(breaks=seq(0,nrow(temp)+360,360)) +
-  theme(axis.title = element_text(size = 20, family="Times New Roman",face="bold")) +
-  theme(axis.text=element_text(size=14, family="Times New Roman",face="bold")) +
+  theme(axis.title = element_text(size = 22, family="Times New Roman",face="bold")) +
+  theme(axis.text=element_text(size=18, family="Times New Roman",face="bold")) +
   theme(plot.title = element_text(family="Times New Roman",face="bold")) +
-  theme(legend.text = element_text(family="Times New Roman",face="bold", size=14)) +
-  theme(legend.title =  element_text(family="Times New Roman",face="bold", size=14))
+  theme(legend.text = element_text(family="Times New Roman",face="bold", size=18)) +
+  theme(legend.title =  element_text(family="Times New Roman",face="bold", size=18)) +
+  theme(
+    axis.title.y = element_text(vjust = +1),
+    axis.title.x = element_text(vjust = -0.8)
+  ) 
 

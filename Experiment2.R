@@ -40,6 +40,7 @@ library(caret)
 library(xgboost)
 library(zoo)
 library(stresshelpers)
+library("ggsci")
 
 options(scipen=999)
 
@@ -133,15 +134,16 @@ model <- xgb.train(
 # [73]	train-rmse:0.023707	test-rmse:0.024838
 
 importance_matrix <- xgb.importance(model = model)
+importance_matrix$Feature <- toupper(importance_matrix$Feature)
 xgb.ggplt <- xgb.ggplot.importance(importance_matrix = importance_matrix, top_n = 10)
-xgb.ggplt + theme(text = element_text(size = 20),
-                  axis.text.x = element_text(size = 20, angle = 45, hjust = 1)) + 
-  theme_classic() +
+xgb.ggplt + theme(text = element_text(size = 14),
+                  axis.text.x = element_text(size = 14, angle = 45, hjust = 1)) + 
+  theme_classic() +  scale_color_lancet() +  scale_fill_lancet() +
   theme(axis.title = element_text(size = 20, family="Times New Roman",face="bold")) +
-  theme(axis.text=element_text(size=20, family="Times New Roman",face="bold")) +
+  theme(axis.text=element_text(size=16, family="Times New Roman",face="bold")) +
   theme(plot.title = element_text(family="Times New Roman",face="bold")) +
-  theme(legend.text = element_text(family="Times New Roman",face="bold", size=14)) +
-  theme(legend.title =  element_text(family="Times New Roman",face="bold", size=14))
+  theme(legend.text = element_text(family="Times New Roman",face="bold", size=20)) +
+  theme(legend.title =  element_text(family="Times New Roman",face="bold", size=20))
 
 # now validate against unseen neuro 
 pred <- predict(model, as.matrix(data_neuro[,1:10]))

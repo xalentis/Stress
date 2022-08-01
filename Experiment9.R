@@ -1,4 +1,4 @@
-# Experiment 6
+# Experiment 9
 
 # Investigating Wearable Sensor Biomarkers for Chronic Stress Measurement and Analysis
 # Gideon Vos, Master of Philosophy, James Cook University, 2022
@@ -44,44 +44,31 @@ library(e1071)
 library(stresshelpers)
 library(keras)
 library(TTR)
+library(ROSE)
 
 options(scipen=999)
 set.seed(123)
+tensorflow::set_random_seed(123)
 
 #########################################################################################################################################################
-# Load and Prep StressData for Training
+# Load and Prep SWELL for Training
 #########################################################################################################################################################
-data_neuro <- stresshelpers::make_neuro_data('NEURO', feature_engineering = TRUE)
-data_swell <- stresshelpers::make_swell_data('SWELL', feature_engineering = TRUE)
-data_wesad <- stresshelpers::make_wesad_data('WESAD', feature_engineering = TRUE)
-data_ubfc  <-  stresshelpers::make_ubfc_data('UBFC',  feature_engineering = TRUE)
+data <- stresshelpers::make_swell_data('SWELL', feature_engineering = TRUE)
 
-# balancing across data sources: XGB
-data_neuro$Balance <- 1
-data_swell$Balance <- 1
-data_wesad$Balance <- 1
-data_ubfc$Balance <- 0
-
-data <- rbind(data_neuro, data_swell, data_wesad, data_ubfc) # 99 subjects
-data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric, Balance)
-
-rm(data_neuro, data_swell, data_wesad, data_ubfc)
+data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
 gc()
 
 #########################################################################################################################################################
 # Model training - xgboost using optimal parameters
 #########################################################################################################################################################
-train.index <- createDataPartition(data$Subject, p = .7, list = FALSE) # 70/30 train/test split along subjects
+train.index <- createDataPartition(data$metric, p = .7, list = FALSE) # 70/30 train/test split along subjects
 train <- data[train.index,]
 test <- data[-train.index,]
-
-# class balancing
-scale_pos_weight = nrow(train[train$Balance==0,])/nrow(train[train$Balance==1,])
 
 # found using hyper parameter search
 params <- list(
   eta = 0.5, 
-  max_depth = 8, 
+  max_depth = 2, 
   subsample = 0.70,
   colsample_bytree = 0.8
 )
@@ -96,11 +83,11 @@ model_xgb <- xgb.train(
   watchlist = watchlist,
   nrounds = 5000,
   early_stopping_rounds = 3,
-  verbose = 1,
-  scale_pos_weight = scale_pos_weight
+  verbose = 1
 )
 
-# [151]	train-rmse:0.025898	test-rmse:0.026284
+
+# [675]	train-rmse:0.138321	test-rmse:0.147047
 
 #########################################################################################################################################################
 # Build Neural Network Model
@@ -146,122 +133,114 @@ history <- fit(
   epochs           = 120,
   validation_data  = list(x_test, y_test),
   shuffle          = TRUE,
-  callbacks        = list(callback_early_stopping(monitor = "val_loss", patience = 5, restore_best_weights = TRUE))
+  callbacks        = list(callback_early_stopping(monitor = "val_loss", patience = 3, restore_best_weights = TRUE))
 )
 
-# 360/360 [==============================] - 1s 2ms/step - loss: 0.1220 - val_loss: 0.1217
-
-rm(data, history, params, test, train, train.index, watchlist, x_test, dtest, dtrain, scale_pos_weight, y_test, y_train)
-gc()
+# 216/216 [==============================] - 0s 2ms/step - loss: 0.1161 - val_loss: 0.1168
 
 #########################################################################################################################################################
-# Test on unseen EXAM data
+# Test on unseen NEURO data
 #########################################################################################################################################################
-exam_data <- stresshelpers::make_exam_data('EXAM')
-exam_data <- exam_data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject)
-gc()
-exam_data$metric <- 1
-weighted <- function(xgb, ann) (xgb*0.5) + (ann*0.5)
+data_neuro <- stresshelpers::make_neuro_data('NEURO', feature_engineering = TRUE)
+data_neuro <- data_neuro %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
+
+weighted <- function(xgb, ann) (xgb*0.3) + (ann*0.8)
 
 results <- NULL
-subjects <- unique(exam_data$Subject)
+subjects <- unique(data_neuro$Subject)
 for (subject in subjects)
 {
-  val <- exam_data[exam_data$Subject == subject,]
+  val <- data_neuro[data_neuro$Subject == subject,]
   x_val <- val[,1:10]
   yhat_xgb <- predict(model_xgb, as.matrix(x_val))
   x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
   yhat_nn <- as.data.frame(predict(model_nn, x_val))
   yhat_nn <- yhat_nn[,1]
-  yhat_nn[yhat_nn > 0.5] <- 1
+  yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
   yhat_ens <- weighted(yhat_xgb, yhat_nn)
   yhat_xgb <- round(yhat_xgb)
   yhat_nn <- round(yhat_nn)
+  yhat_ens <- round(yhat_ens)
+  acc_xgb <- sum(as.numeric(val$metric == yhat_xgb))/nrow(val)
+  acc_ann <- sum(as.numeric(val$metric == yhat_nn))/nrow(val)
+  acc_ens <- sum(as.numeric(val$metric == yhat_ens))/nrow(val)
   
+  # precision, recall, F1 score
+  precision <- posPredValue(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
+  recall <- sensitivity(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
+  F1 <- (2 * precision * recall) / (precision + recall)
+  
+  res <- cbind(subject, acc_xgb, acc_ann, acc_ens, precision, recall, F1)
+  res <- as.data.frame(res)
+  names(res) <- c("SUBJECT","XGB","ANN","ENS", "PRECISION", "RECALL", "F1")
+  results <- rbind(results, res)
+}
 
+results$XGB <- as.numeric(results$XGB)
+results$ANN <- as.numeric(results$ANN)
+results$ENS <- as.numeric(results$ENS)
+results$PRECISION <- as.numeric(results$PRECISION)
+results$RECALL <- as.numeric(results$RECALL)
+results$F1 <- as.numeric(results$F1)
+
+print(mean(results$XGB, na.rm=TRUE)) # 0.45
+print(mean(results$ANN, na.rm=TRUE)) # 0.58
+print(mean(results$ENS, na.rm=TRUE)) # 0.59
+print(mean(results$PRECISION, na.rm=TRUE)) # 0.64
+print(mean(results$RECALL, na.rm=TRUE)) # 0.63
+print(mean(results$F1, na.rm=TRUE)) # 0.62
+
+
+#########################################################################################################################################################
+# Test on unseen WESAD data
+#########################################################################################################################################################
+data_wesad <- stresshelpers::make_wesad_data('WESAD', feature_engineering = TRUE)
+data_wesad <- data_wesad %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
+
+weighted <- function(xgb, ann) (xgb*0.6) + (ann*0.4)
+
+results <- NULL
+subjects <- unique(data_wesad$Subject)
+for (subject in subjects)
+{
+  val <- data_wesad[data_wesad$Subject == subject,]
+  x_val <- val[,1:10]
+  yhat_xgb <- predict(model_xgb, as.matrix(x_val))
+  x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
+  yhat_nn <- as.data.frame(predict(model_nn, x_val))
+  yhat_nn <- yhat_nn[,1]
+  yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
+  
+  yhat_ens <- weighted(yhat_xgb, yhat_nn)
+  yhat_xgb <- round(yhat_xgb)
+  yhat_nn <- round(yhat_nn)
   
   yhat_ens <- round(yhat_ens)
   acc_xgb <- sum(as.numeric(val$metric == yhat_xgb))/nrow(val)
   acc_ann <- sum(as.numeric(val$metric == yhat_nn))/nrow(val)
   acc_ens <- sum(as.numeric(val$metric == yhat_ens))/nrow(val)
   
+  # precision, recall, F1 score
+  precision <- posPredValue(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
   recall <- sensitivity(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
+  F1 <- (2 * precision * recall) / (precision + recall)
   
-  res <- cbind(subject, acc_xgb, acc_ann, acc_ens, recall)
+  res <- cbind(subject, acc_xgb, acc_ann, acc_ens, precision, recall, F1)
   res <- as.data.frame(res)
-  names(res) <- c("SUBJECT","XGB","ANN","ENS", "RECALL")
+  names(res) <- c("SUBJECT","XGB","ANN","ENS", "PRECISION", "RECALL", "F1")
   results <- rbind(results, res)
 }
-
 
 results$XGB <- as.numeric(results$XGB)
 results$ANN <- as.numeric(results$ANN)
 results$ENS <- as.numeric(results$ENS)
+results$PRECISION <- as.numeric(results$PRECISION)
 results$RECALL <- as.numeric(results$RECALL)
+results$F1 <- as.numeric(results$F1)
 
-print(mean(results$XGB, na.rm=TRUE)) # 0.51
-print(mean(results$ANN, na.rm=TRUE)) # 0.59
-print(mean(results$ENS, na.rm=TRUE)) # 0.69
-print(mean(results$RECALL, na.rm=TRUE)) # 0.69
-
-
-temp <- exam_data[exam_data$Subject=='S1_Final',]
-x_val <- temp[,1:10]
-yhat_xgb <- predict(model_xgb, as.matrix(x_val))
-x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
-yhat_nn <- as.data.frame(predict(model_nn, x_val))
-yhat_nn <- yhat_nn[,1]
-yhat_nn[yhat_nn > 0.5] <- 1
-yhat_ens <- weighted(yhat_xgb, yhat_nn)
-temp <- cbind(yhat_xgb, yhat_nn, yhat_ens)
-temp <- as.data.frame(temp)
-names(temp) <- c("xgb","ann","ens")
-temp$ID <- seq.int(nrow(temp))
-ggplot(temp, aes(x=ID)) + 
-  geom_line(aes(y = runMean(ens, 120) , colour="ENS"), size=0.5) + 
-  scale_color_lancet() + scale_fill_lancet() +
-  labs(colour="Model") + 
-  guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
-  theme_classic() + ylab('Stress - S1 (Final)') + xlab('Time (seconds)') + 
-  scale_y_continuous(limits=c(0,1))+
-  scale_x_continuous(breaks=seq(0,nrow(temp)+2400,2400)) +
-  theme(axis.title = element_text(size = 22, family="Times New Roman",face="bold")) +
-  theme(axis.text=element_text(size=18, family="Times New Roman",face="bold")) +
-  theme(plot.title = element_text(family="Times New Roman",face="bold")) +
-  theme(legend.text = element_text(family="Times New Roman",face="bold", size=18)) +
-  theme(legend.title =  element_text(family="Times New Roman",face="bold", size=18)) +
-  theme(
-    axis.title.y = element_text(vjust = +1),
-    axis.title.x = element_text(vjust = -0.8)
-  ) 
-
-
-
-temp <- exam_data[exam_data$Subject=='S10_Final',]
-x_val <- temp[,1:10]
-yhat_xgb <- predict(model_xgb, as.matrix(x_val))
-x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
-yhat_nn <- as.data.frame(predict(model_nn, x_val))
-yhat_nn[yhat_nn > 0.5] <- 1
-yhat_ens <- weighted(yhat_xgb, yhat_nn)
-temp <- cbind(yhat_xgb, yhat_nn, yhat_ens)
-temp <- as.data.frame(temp)
-names(temp) <- c("xgb","ann","ens")
-temp$ID <- seq.int(nrow(temp))
-ggplot(temp, aes(x=ID)) + 
-  geom_line(aes(y = runMean(ens, 60) , colour="ENS"), size=0.5) + 
-  scale_color_lancet() + scale_fill_lancet() +
-  labs(colour="Model") + 
-  guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
-  theme_classic() + ylab('Stress - S10 (Final)') + xlab('Time (seconds)') + 
-  scale_y_continuous(limits=c(0,1))+
-  scale_x_continuous(breaks=seq(0,nrow(temp)+2400,2400)) +
-  theme(axis.title = element_text(size = 22, family="Times New Roman",face="bold")) +
-  theme(axis.text=element_text(size=18, family="Times New Roman",face="bold")) +
-  theme(plot.title = element_text(family="Times New Roman",face="bold")) +
-  theme(legend.text = element_text(family="Times New Roman",face="bold", size=18)) +
-  theme(legend.title =  element_text(family="Times New Roman",face="bold", size=18)) +
-  theme(
-    axis.title.y = element_text(vjust = +1),
-    axis.title.x = element_text(vjust = -0.8)
-  ) 
+print(mean(results$XGB, na.rm=TRUE)) # 0.65
+print(mean(results$ANN, na.rm=TRUE)) # 0.57
+print(mean(results$ENS, na.rm=TRUE)) # 0.66
+print(mean(results$PRECISION, na.rm=TRUE)) # 0.64
+print(mean(results$RECALL, na.rm=TRUE)) # 0.23
+print(mean(results$F1, na.rm=TRUE)) # 0.37
