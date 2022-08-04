@@ -210,6 +210,21 @@ synthesize <- function(subject_count)
 }
 
 data <- synthesize(200)
+
+
+Q <- quantile(data$eda, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(data$eda)
+up <-  Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range﻿
+data <- subset(data, data$eda > (Q[1] - 1.5*iqr) & data$eda < (Q[2]+1.5*iqr))
+
+Q <- quantile(data$hr, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(data$hr)
+up <-  Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range﻿
+data <- subset(data, data$hr > (Q[1] - 1.5*iqr) & data$hr < (Q[2]+1.5*iqr))
+
+
 data <- stresshelpers::rolling_features(data, 25)
 data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
 
@@ -336,18 +351,18 @@ results$PRECISION <- as.numeric(results$PRECISION)
 results$RECALL <- as.numeric(results$RECALL)
 results$F1 <- as.numeric(results$F1)
 
-print(mean(results$XGB, na.rm=TRUE)) # 0.8672
-print(mean(results$ANN, na.rm=TRUE)) # 0.8658
-print(mean(results$ENS, na.rm=TRUE)) # 0.8710
-print(mean(results$PRECISION, na.rm=TRUE)) # 0.89
-print(mean(results$RECALL, na.rm=TRUE)) # 0.85
-print(mean(results$F1, na.rm=TRUE)) # 0.86
+print(mean(results$XGB, na.rm=TRUE)) # 0.8865
+print(mean(results$ANN, na.rm=TRUE)) # 0.8574
+print(mean(results$ENS, na.rm=TRUE)) # 0.8877
+print(mean(results$PRECISION, na.rm=TRUE)) # 0.90
+print(mean(results$RECALL, na.rm=TRUE)) # 0.88
+print(mean(results$F1, na.rm=TRUE)) # 0.88
 
 #########################################################################################################################################################
 # Test
 #########################################################################################################################################################
 
-temp <- data[data$Subject=='X59',]
+temp <- data[data$Subject=='X45',]
 x_val <- temp[,1:10]
 yhat_xgb <- predict(model_xgb, as.matrix(x_val))
 x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
@@ -365,7 +380,7 @@ ggplot(temp, aes(x=ID)) +
   scale_color_lancet() + scale_fill_lancet() +
   labs(colour="Model") + 
   guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
-  theme_classic() + ylab('Synthetic - X59') + xlab('Time (seconds)') + 
+  theme_classic() + ylab('Synthetic - X45') + xlab('Time (seconds)') + 
   scale_x_continuous(breaks=seq(0,nrow(temp)+120,120)) +
   theme(axis.title = element_text(size = 22, family="Times New Roman",face="bold")) +
   theme(axis.text=element_text(size=18, family="Times New Roman",face="bold")) +
@@ -377,7 +392,7 @@ ggplot(temp, aes(x=ID)) +
     axis.title.x = element_text(vjust = -0.8)
   ) 
 
-temp <- data[data$Subject=='X200',]
+temp <- data[data$Subject=='X63',]
 x_val <- temp[,1:10]
 yhat_xgb <- predict(model_xgb, as.matrix(x_val))
 x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
@@ -395,7 +410,7 @@ ggplot(temp, aes(x=ID)) +
   scale_color_lancet() + scale_fill_lancet() +
   labs(colour="Model") + 
   guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
-  theme_classic() + ylab('Syntheic - X200') + xlab('Time (seconds)') + 
+  theme_classic() + ylab('Synthetic - X63') + xlab('Time (seconds)') + 
   scale_x_continuous(breaks=seq(0,nrow(temp)+120,120)) +
   theme(axis.title = element_text(size = 22, family="Times New Roman",face="bold")) +
   theme(axis.text=element_text(size=18, family="Times New Roman",face="bold")) +

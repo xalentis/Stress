@@ -156,6 +156,19 @@ synthesize <- function(subject_count)
 }
 
 data <- synthesize(200)
+
+Q <- quantile(data$eda, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(data$eda)
+up <-  Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range﻿
+data <- subset(data, data$eda > (Q[1] - 1.5*iqr) & data$eda < (Q[2]+1.5*iqr))
+
+Q <- quantile(data$hr, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(data$hr)
+up <-  Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range﻿
+data <- subset(data, data$hr > (Q[1] - 1.5*iqr) & data$hr < (Q[2]+1.5*iqr))
+
 data <- stresshelpers::rolling_features(data, 25)
 data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
 gc()
@@ -353,7 +366,7 @@ print(mean(results$PRECISION, na.rm=TRUE)) # 0.74
 print(mean(results$RECALL, na.rm=TRUE)) # 0.65
 print(mean(results$F1, na.rm=TRUE)) # 0.79
 
-temp <- data_wesad[data_wesad$Subject=='W5',]
+temp <- data_wesad[data_wesad$Subject=='W15',]
 x_val <- temp[,1:10]
 yhat_xgb <- predict(model_xgb, as.matrix(x_val))
 x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
@@ -371,7 +384,7 @@ ggplot(temp, aes(x=ID)) +
   scale_color_lancet() + scale_fill_lancet() +
   labs(colour="Model") + 
   guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
-  theme_classic() + ylab('W5') + xlab('Time (seconds)') + 
+  theme_classic() + ylab('W15') + xlab('Time (seconds)') + 
   scale_x_continuous(breaks=seq(0,nrow(temp)+120,120)) +
   theme(axis.title = element_text(size = 22, family="Times New Roman",face="bold")) +
   theme(axis.text=element_text(size=18, family="Times New Roman",face="bold")) +
