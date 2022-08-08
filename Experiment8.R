@@ -282,7 +282,7 @@ val$ensemble <- weighted(val$yhat_xgb , val$yhat_nn)
 temp <- val[val$Subject=="T2",]
 temp$ID <- seq.int(nrow(temp))
 ggplot(temp, aes(x=ID)) + 
-  geom_line(aes(y = runMean(ensemble, 60) , colour="ENS"), size=0.5) + 
+  geom_line(aes(y = runMean(ensemble, 360) , colour="ENS"), size=0.5) + 
   scale_color_lancet() + scale_fill_lancet() +
   labs(colour="Model") + 
   guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 

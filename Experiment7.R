@@ -155,103 +155,6 @@ synthesize <- function(subject_count)
   return (newdata)
 }
 
-data <- synthesize(200)
-
-Q <- quantile(data$eda, probs=c(.25, .75), na.rm = FALSE)
-iqr <- IQR(data$eda)
-up <-  Q[2]+1.5*iqr # Upper Range  
-low<- Q[1]-1.5*iqr # Lower Range﻿
-data <- subset(data, data$eda > (Q[1] - 1.5*iqr) & data$eda < (Q[2]+1.5*iqr))
-
-Q <- quantile(data$hr, probs=c(.25, .75), na.rm = FALSE)
-iqr <- IQR(data$hr)
-up <-  Q[2]+1.5*iqr # Upper Range  
-low<- Q[1]-1.5*iqr # Lower Range﻿
-data <- subset(data, data$hr > (Q[1] - 1.5*iqr) & data$hr < (Q[2]+1.5*iqr))
-
-data <- stresshelpers::rolling_features(data, 25)
-data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
-gc()
-
-#########################################################################################################################################################
-# Train our synthetic stress dataset
-#########################################################################################################################################################
-
-# found using hyper parameter search
-params <- list(
-  eta = 0.5, 
-  max_depth = 8, 
-  subsample = 0.70,
-  colsample_bytree = 0.8
-)
-
-# train full new model here:
-train.index <- createDataPartition(data$Subject, p = .7, list = FALSE) # 70/30 train/test split along metric
-train <- data[train.index,]
-test <- data[-train.index,]
-
-dtrain <- xgb.DMatrix(data = as.matrix(train[,1:10]), label = train$metric)
-dtest <- xgb.DMatrix(data = as.matrix(test[,1:10]), label = test$metric)
-watchlist <- list(train = dtrain, test = dtest)
-
-model_xgb <- xgb.train(
-  params = params,
-  data = dtrain,
-  objective = "reg:logistic",
-  watchlist = watchlist,
-  nrounds = 500,
-  early_stopping_rounds = 3,
-  verbose = 1
-)
-
-x_train <- train[,1:10]
-y_train <- train$metric
-x_test <- test[,1:10]
-y_test <- test$metric
-
-# scale
-x_train <- scale(x_train)
-x_test <- scale(x_test, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
-
-model_nn <- keras_model_sequential()
-
-model_nn %>% 
-  layer_dense(
-    units              = 10, 
-    kernel_initializer = "normal", 
-    activation         = "relu", 
-    input_shape        = ncol(x_train)) %>% 
-  
-  layer_dense(
-    units              = 4, 
-    kernel_initializer = "normal", 
-    activation         = "relu") %>% 
-  
-  layer_dense(
-    units              = 1, 
-    kernel_initializer = "normal",
-    activation         = "linear") %>%
-  
-  compile(
-    loss = "mse",
-    optimizer = optimizer_adamax()
-  )
-
-history <- fit(
-  object           = model_nn, 
-  x                = x_train, 
-  y                = y_train,
-  batch_size       = 512, 
-  epochs           = 120,
-  validation_data  = list(x_test, y_test),
-  shuffle          = TRUE,
-  callbacks        = list(callback_early_stopping(monitor = "val_loss", patience = 3, restore_best_weights = TRUE)),
-  verbose          = 1
-)
-
-#########################################################################################################################################################
-# Test on WESAD
-#########################################################################################################################################################
 make_wesad_data <- function(folder, feature_engineering = FALSE)
 {
   data <- NULL
@@ -313,85 +216,167 @@ make_wesad_data <- function(folder, feature_engineering = FALSE)
   return(data)
 }
 
-
 data_wesad <-make_wesad_data('WESAD', feature_engineering = TRUE)
 data_wesad <- data_wesad %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
 
 subjects <- unique(data_wesad$Subject) 
-results <- NULL
-weighted <- function(xgb, ann) (xgb*0.5) + (ann*0.5)
+weighted <- function(xgb, ann) (xgb*0.45) + (ann*0.55)
 
-for (subject in subjects)
+params <- list(
+  eta = 0.5, 
+  max_depth = 8, 
+  subsample = 0.70,
+  colsample_bytree = 0.8
+)
+
+gc()
+
+#########################################################################################################################################################
+# Synthesize 200 subjects, train our synthetic stress dataset, test on WESAD, 10 times
+#########################################################################################################################################################
+main_results <- NULL
+
+for (loop in seq(1:10))
 {
-  val <- data_wesad[data_wesad$Subject == subject,]
+  print(paste("Loop:", loop))
+  results <- NULL
   
-  x_val <- val[,1:10]
-  yhat_xgb <- predict(model_xgb, as.matrix(x_val))
-  x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
-  yhat_nn <- as.data.frame(predict(model_nn, x_val))
-  yhat_nn <- yhat_nn[,1]
-  yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
-  yhat_ens <- weighted(yhat_xgb, yhat_nn)
-  yhat_xgb <- round(yhat_xgb)
-  yhat_nn <- round(yhat_nn)
-  yhat_ens <- round(yhat_ens)
-  acc_xgb <- sum(as.numeric(val$metric == yhat_xgb))/nrow(val)
-  acc_ann <- sum(as.numeric(val$metric == yhat_nn))/nrow(val)
-  acc_ens <- sum(as.numeric(val$metric == yhat_ens))/nrow(val)
+  data <- synthesize(200)
   
-  # precision, recall, F1 score
-  precision <- posPredValue(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
-  recall <- sensitivity(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
-  F1 <- (2 * precision * recall) / (precision + recall)
+  Q <- quantile(data$eda, probs=c(.25, .75), na.rm = FALSE)
+  iqr <- IQR(data$eda)
+  up <-  Q[2]+1.5*iqr # Upper Range  
+  low<- Q[1]-1.5*iqr # Lower Range﻿
+  data <- subset(data, data$eda > (Q[1] - 1.5*iqr) & data$eda < (Q[2]+1.5*iqr))
   
-  res <- cbind(subject, acc_xgb, acc_ann, acc_ens, precision, recall, F1)
-  res <- as.data.frame(res)
-  names(res) <- c("SUBJECT","XGB","ANN","ENS", "PRECISION", "RECALL", "F1")
-  results <- rbind(results, res)
-  write.csv(results, "Results_Exp7.csv",row.names = FALSE)
+  Q <- quantile(data$hr, probs=c(.25, .75), na.rm = FALSE)
+  iqr <- IQR(data$hr)
+  up <-  Q[2]+1.5*iqr # Upper Range  
+  low<- Q[1]-1.5*iqr # Lower Range﻿
+  data <- subset(data, data$hr > (Q[1] - 1.5*iqr) & data$hr < (Q[2]+1.5*iqr))
+  
+  data <- stresshelpers::rolling_features(data, 25)
+  data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
+  gc()
+  
+  train.index <- createDataPartition(data$Subject, p = .7, list = FALSE) # 70/30 train/test split along metric
+  train <- data[train.index,]
+  test <- data[-train.index,]
+  
+  dtrain <- xgb.DMatrix(data = as.matrix(train[,1:10]), label = train$metric)
+  dtest <- xgb.DMatrix(data = as.matrix(test[,1:10]), label = test$metric)
+  watchlist <- list(train = dtrain, test = dtest)
+  
+  model_xgb <- xgb.train(
+    params = params,
+    data = dtrain,
+    objective = "reg:logistic",
+    watchlist = watchlist,
+    nrounds = 500,
+    early_stopping_rounds = 3,
+    verbose = 0
+  )
+  
+  x_train <- train[,1:10]
+  y_train <- train$metric
+  x_test <- test[,1:10]
+  y_test <- test$metric
+  
+  # scale
+  x_train <- scale(x_train)
+  x_test <- scale(x_test, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
+  
+  model_nn <- keras_model_sequential()
+  
+  model_nn %>% 
+    layer_dense(
+      units              = 10, 
+      kernel_initializer = "normal", 
+      activation         = "relu", 
+      input_shape        = ncol(x_train)) %>% 
+    
+    layer_dense(
+      units              = 4, 
+      kernel_initializer = "normal", 
+      activation         = "relu") %>% 
+    
+    layer_dense(
+      units              = 1, 
+      kernel_initializer = "normal",
+      activation         = "linear") %>%
+    
+    compile(
+      loss = "mse",
+      optimizer = optimizer_adamax()
+    )
+  
+  history <- fit(
+    object           = model_nn, 
+    x                = x_train, 
+    y                = y_train,
+    batch_size       = 512, 
+    epochs           = 120,
+    validation_data  = list(x_test, y_test),
+    shuffle          = TRUE,
+    callbacks        = list(callback_early_stopping(monitor = "val_loss", patience = 3, restore_best_weights = TRUE)),
+    verbose          = 0
+  )
+  
+  for (subject in subjects)
+  {
+    val <- data_wesad[data_wesad$Subject == subject,]
+    
+    x_val <- val[,1:10]
+    yhat_xgb <- predict(model_xgb, as.matrix(x_val))
+    x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
+    yhat_nn <- as.data.frame(predict(model_nn, x_val))
+    yhat_nn <- yhat_nn[,1]
+    yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
+    yhat_ens <- weighted(yhat_xgb, yhat_nn)
+    yhat_xgb <- round(yhat_xgb)
+    yhat_nn <- round(yhat_nn)
+    yhat_ens <- round(yhat_ens)
+    acc_xgb <- sum(as.numeric(val$metric == yhat_xgb))/nrow(val)
+    acc_ann <- sum(as.numeric(val$metric == yhat_nn))/nrow(val)
+    acc_ens <- sum(as.numeric(val$metric == yhat_ens))/nrow(val)
+    
+    # precision, recall, F1 score
+    precision <- posPredValue(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
+    recall <- sensitivity(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
+    F1 <- (2 * precision * recall) / (precision + recall)
+    
+    res <- cbind(subject, acc_xgb, acc_ann, acc_ens, precision, recall, F1)
+    res <- as.data.frame(res)
+    names(res) <- c("SUBJECT","XGB","ANN","ENS", "PRECISION", "RECALL", "F1")
+    results <- rbind(results, res)
+  }
+  
+  results$XGB <- as.numeric(results$XGB)
+  results$ANN <- as.numeric(results$ANN)
+  results$ENS <- as.numeric(results$ENS)
+  results$PRECISION <- as.numeric(results$PRECISION)
+  results$RECALL <- as.numeric(results$RECALL)
+  results$F1 <- as.numeric(results$F1)
+  
+  temp <- cbind(loop, mean(results$XGB, na.rm=TRUE), mean(results$ANN, na.rm=TRUE), mean(results$ENS, na.rm=TRUE), mean(results$PRECISION, na.rm=TRUE), mean(results$RECALL, na.rm=TRUE), mean(results$F1, na.rm=TRUE))
+  temp <- as.data.frame(temp)
+  main_results <- rbind(main_results, temp)
+  
 }
+names(main_results) <- c("Iteration", "XGB", "ANN", "Ensemble","Precision","Recall","F1")
+write.csv(main_results, "Experiment7_Main10.csv", row.names = FALSE)
+print(mean(main_results$XGB)) # 0.8246982
+print(mean(main_results$ANN)) # 0.8246982
+print(mean(main_results$Ensemble)) # 0.8503623
+print(mean(main_results$Precision)) # 0.9007939
+print(mean(main_results$Recall)) # 0.7364272
+print(mean(main_results$F1)) # 0.7816372
+
+print(sd(main_results$XGB)) # 0.01587863
+print(sd(main_results$ANN)) # 0.04512476
+print(sd(main_results$Ensemble)) # 0.02935605
+print(sd(main_results$Precision)) # 0.04185531
+print(sd(main_results$Recall)) # 0.06595269
+print(sd(main_results$F1)) # 0.06289532
 
 
-results$XGB <- as.numeric(results$XGB)
-results$ANN <- as.numeric(results$ANN)
-results$ENS <- as.numeric(results$ENS)
-results$PRECISION <- as.numeric(results$PRECISION)
-results$RECALL <- as.numeric(results$RECALL)
-results$F1 <- as.numeric(results$F1)
-
-print(mean(results$XGB, na.rm=TRUE)) # 0.79
-print(mean(results$ANN, na.rm=TRUE)) # 0.78
-print(mean(results$ENS, na.rm=TRUE)) # 0.81
-print(mean(results$PRECISION, na.rm=TRUE)) # 0.83
-print(mean(results$RECALL, na.rm=TRUE)) # 0.71
-print(mean(results$F1, na.rm=TRUE)) # 0.74
-
-temp <- data_wesad[data_wesad$Subject=='W15',]
-x_val <- temp[,1:10]
-yhat_xgb <- predict(model_xgb, as.matrix(x_val))
-x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
-yhat_nn <- as.data.frame(predict(model_nn, x_val))
-yhat_nn <- yhat_nn[,1]
-yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
-yhat_ens <- weighted(yhat_xgb, yhat_nn)
-temp <- cbind(yhat_xgb, yhat_nn, yhat_ens, temp$metric)
-temp <- as.data.frame(temp)
-names(temp) <- c("xgb","ann","ens","metric")
-temp$ID <- seq.int(nrow(temp))
-ggplot(temp, aes(x=ID)) + 
-  geom_area(aes(y = metric, colour="STRESS"), fill="#FF6666",  alpha=0.4, size=0.5) + 
-  geom_line(aes(y = ens , colour="ENS"), size=0.5) + 
-  scale_color_lancet() + scale_fill_lancet() +
-  labs(colour="Model") + 
-  guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
-  theme_classic() + ylab('W15') + xlab('Time (seconds)') + 
-  scale_x_continuous(breaks=seq(0,nrow(temp)+120,120)) +
-  theme(axis.title = element_text(size = 22, family="Times New Roman",face="bold")) +
-  theme(axis.text=element_text(size=18, family="Times New Roman",face="bold")) +
-  theme(plot.title = element_text(family="Times New Roman",face="bold")) +
-  theme(legend.text = element_text(family="Times New Roman",face="bold", size=18)) +
-  theme(legend.title =  element_text(family="Times New Roman",face="bold", size=18)) +
-  theme(
-    axis.title.y = element_text(vjust = +1),
-    axis.title.x = element_text(vjust = -0.8)
-  ) 
