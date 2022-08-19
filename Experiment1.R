@@ -1,6 +1,6 @@
 # Experiment 1
 
-# Investigating Wearable Sensor Biomarkers for Chronic Stress Measurement and Analysis
+# Ensemble Machine Learning Model Trained on a New Synthesized Dataset Generalizes Well for Stress Prediction Using Wearable Device
 # Gideon Vos, Master of Philosophy, James Cook University, 2022
 
 # Citations:
