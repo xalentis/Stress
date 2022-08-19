@@ -1,4 +1,4 @@
-# Experiment 10
+# Experiment 9
 
 # Investigating Wearable Sensor Biomarkers for Chronic Stress Measurement and Analysis
 # Gideon Vos, Master of Philosophy, James Cook University, 2022
@@ -55,16 +55,13 @@ tensorflow::set_random_seed(123)
 #########################################################################################################################################################
 data_neuro <- stresshelpers::make_neuro_data('NEURO', feature_engineering = FALSE)
 data_swell <- stresshelpers::make_swell_data('SWELL', feature_engineering = FALSE)
-data_wesad <- stresshelpers::make_wesad_data('WESAD', feature_engineering = FALSE)
 data_ubfc  <- stresshelpers::make_ubfc_data('UBFC',  feature_engineering = FALSE)
-data_exam  <- make_exam_data('EXAM')
-data_exam <- data_exam %>% select(eda, hr, Subject)
-data_exam$metric <- 1
+data_exam  <- stresshelpers::make_exam_data_full('EXAM')
 
-data <- rbind(data_neuro, data_swell, data_wesad, data_ubfc, data_exam)
-data <- data %>% select(hr, eda, Subject, metric)
+data <- rbind(data_neuro, data_swell, data_ubfc, data_exam)
+data <- data %>% select(hr, eda, Subject, metric) # 115
 
-rm(data_neuro, data_swell, data_ubfc, data_exam, data_wesad)
+rm(data_neuro, data_swell, data_ubfc, data_exam)
 gc()
 
 # split subjects into stressed/non-stressed
@@ -128,8 +125,9 @@ gc()
 stressed <- data[data$metric==1,]
 nonstressed <- data[data$metric==0,]
 
-stressed_subjects <- unique(stressed$Subject)
-nonstressed_subjects <- unique(nonstressed$Subject)
+# 3600
+stressed_subjects <- unique(stressed$Subject) # 2917
+nonstressed_subjects <- unique(nonstressed$Subject) # 683
 
 rm(data)
 gc()
@@ -158,29 +156,73 @@ synthesize <- function(subject_count)
   return (newdata)
 }
 
-data <- synthesize(200)
+make_wesad_data <- function(folder, feature_engineering = FALSE)
+{
+  data <- NULL
+  indexes <- c(3,4,5,6,7,8,9,10,11,13,14,15,16,17)
+  for (subject in indexes)
+  {
+    wesad <- read.empatica(paste(folder, '/S', subject, sep=''))
+    eda_sampling_rate <- wesad$signal$eda$samplingrate
+    metrics <- read.csv(paste(folder,'/Metrics/S', subject, '_quest.csv', sep=''), sep=';')
+    metrics <- metrics[1:3,2:9]
+    names(metrics) <- metrics[1,]
+    metrics <- metrics[2:3,]
+    metric <- rep(NA, wesad$properties$length) # NA=transient/not defined
+    for (index in 1:ncol(metrics))
+    {
+      temp <- strsplit(metrics[1,index],'.', TRUE)
+      start <- (as.numeric(temp[[1]][1])*60)
+      if (length(temp[[1]]) == 2)
+      {
+        start <- start + as.numeric(temp[[1]][2])
+      }
+      temp <- strsplit(metrics[2,index],'.', TRUE)
+      end <- (as.numeric(temp[[1]][1])*60)
+      if (length(temp[[1]]) == 2)
+      {
+        end <- end + as.numeric(temp[[1]][2])
+      }
+      if (substr(names(metrics)[index],1,4) == 'Base') metric[start:end] <- NA
+      if (substr(names(metrics)[index],1,4) == 'TSST') metric[start:end] <- 1 # keep only stressed portion
+      if (substr(names(metrics)[index],1,3) == 'Fun') metric[start:end] <- NA
+      if (substr(names(metrics)[index],1,4) == 'Medi') metric[start:end] <- NA
+    }
+    hr <- wesad$signal$hr$data # 1Hz, each entry is 10 seconds
+    eda <- downsample(wesad$signal$eda$data, eda_sampling_rate)
+    shortest_sample <- min(length(hr), length(eda), length(metric))
+    hr <- hr[1:shortest_sample]
+    eda <- eda[1:shortest_sample]
+    metric <- metric[1:shortest_sample]
+    temp <- cbind(eda, hr, metric)
+    names(temp) <- c("eda", "hr", "metric")
+    temp <- as.data.frame(temp)
+    temp <- na.omit(temp)
+    temp2 <- NULL
+    # synthesize a baseline condition
+    sample_nonstressed <- sample(nonstressed_subjects, 4)
+    temp2 <- rbind(temp2, nonstressed[nonstressed$Subject==sample_nonstressed[[1]],])
+    temp2 <- rbind(temp2, nonstressed[nonstressed$Subject==sample_nonstressed[[2]],])
+    temp2 <- rbind(temp2, nonstressed[nonstressed$Subject==sample_nonstressed[[3]],])
+    temp2 <- rbind(temp2, nonstressed[nonstressed$Subject==sample_nonstressed[[4]],])
+    temp2 <- temp2 %>% select(eda,hr,metric)
+    temp <- rbind(temp2, temp)
+    if (feature_engineering == TRUE)
+    {
+      temp <- rolling_features(temp, 25)
+    }
+    temp$Subject <- paste('W', subject, sep='')
+    data <- rbind(data, temp)
+  }
+  return(data)
+}
 
-Q <- quantile(data$eda, probs=c(.25, .75), na.rm = FALSE)
-iqr <- IQR(data$eda)
-up <-  Q[2]+1.5*iqr # Upper Range  
-low<- Q[1]-1.5*iqr # Lower Range﻿
-data <- subset(data, data$eda > (Q[1] - 1.5*iqr) & data$eda < (Q[2]+1.5*iqr))
+data_wesad <-make_wesad_data('WESAD', feature_engineering = TRUE)
+data_wesad <- data_wesad %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
 
-Q <- quantile(data$hr, probs=c(.25, .75), na.rm = FALSE)
-iqr <- IQR(data$hr)
-up <-  Q[2]+1.5*iqr # Upper Range  
-low<- Q[1]-1.5*iqr # Lower Range﻿
-data <- subset(data, data$hr > (Q[1] - 1.5*iqr) & data$hr < (Q[2]+1.5*iqr))
+subjects <- unique(data_wesad$Subject) 
+weighted <- function(xgb, ann) (xgb*0.45) + (ann*0.55)
 
-data <- stresshelpers::rolling_features(data, 25)
-data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
-gc()
-
-#########################################################################################################################################################
-# Train our synthetic stress dataset
-#########################################################################################################################################################
-
-# found using hyper parameter search
 params <- list(
   eta = 0.5, 
   max_depth = 8, 
@@ -188,114 +230,154 @@ params <- list(
   colsample_bytree = 0.8
 )
 
-# train full new model here:
-train.index <- createDataPartition(data$Subject, p = .7, list = FALSE) # 70/30 train/test split along metric
-train <- data[train.index,]
-test <- data[-train.index,]
+gc()
 
-dtrain <- xgb.DMatrix(data = as.matrix(train[,1:10]), label = train$metric)
-dtest <- xgb.DMatrix(data = as.matrix(test[,1:10]), label = test$metric)
-watchlist <- list(train = dtrain, test = dtest)
+#########################################################################################################################################################
+# Synthesize 200 subjects, train our synthetic stress dataset, test on WESAD, 10 times
+#########################################################################################################################################################
+main_results <- NULL
 
-model_xgb <- xgb.train(
-  params = params,
-  data = dtrain,
-  objective = "reg:logistic",
-  watchlist = watchlist,
-  nrounds = 500,
-  early_stopping_rounds = 3,
-  verbose = 1
-)
-
-x_train <- train[,1:10]
-y_train <- train$metric
-x_test <- test[,1:10]
-y_test <- test$metric
-
-# scale
-x_train <- scale(x_train)
-x_test <- scale(x_test, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
-
-model_nn <- keras_model_sequential()
-
-model_nn %>% 
-  layer_dense(
-    units              = 10, 
-    kernel_initializer = "normal", 
-    activation         = "relu", 
-    input_shape        = ncol(x_train)) %>% 
+for (loop in seq(1:10))
+{
+  print(paste("Loop:", loop))
+  results <- NULL
   
-  layer_dense(
-    units              = 4, 
-    kernel_initializer = "normal", 
-    activation         = "relu") %>% 
+  data <- synthesize(200)
   
-  layer_dense(
-    units              = 1, 
-    kernel_initializer = "normal",
-    activation         = "linear") %>%
+  Q <- quantile(data$eda, probs=c(.25, .75), na.rm = FALSE)
+  iqr <- IQR(data$eda)
+  up <-  Q[2]+1.5*iqr # Upper Range  
+  low<- Q[1]-1.5*iqr # Lower Range﻿
+  data <- subset(data, data$eda > (Q[1] - 1.5*iqr) & data$eda < (Q[2]+1.5*iqr))
   
-  compile(
-    loss = "mse",
-    optimizer = optimizer_adamax()
+  Q <- quantile(data$hr, probs=c(.25, .75), na.rm = FALSE)
+  iqr <- IQR(data$hr)
+  up <-  Q[2]+1.5*iqr # Upper Range  
+  low<- Q[1]-1.5*iqr # Lower Range﻿
+  data <- subset(data, data$hr > (Q[1] - 1.5*iqr) & data$hr < (Q[2]+1.5*iqr))
+  
+  data <- stresshelpers::rolling_features(data, 25)
+  data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
+  gc()
+  
+  train.index <- createDataPartition(data$Subject, p = .7, list = FALSE) # 70/30 train/test split along metric
+  train <- data[train.index,]
+  test <- data[-train.index,]
+  
+  dtrain <- xgb.DMatrix(data = as.matrix(train[,1:10]), label = train$metric)
+  dtest <- xgb.DMatrix(data = as.matrix(test[,1:10]), label = test$metric)
+  watchlist <- list(train = dtrain, test = dtest)
+  
+  model_xgb <- xgb.train(
+    params = params,
+    data = dtrain,
+    objective = "reg:logistic",
+    watchlist = watchlist,
+    nrounds = 500,
+    early_stopping_rounds = 3,
+    verbose = 0
   )
+  
+  x_train <- train[,1:10]
+  y_train <- train$metric
+  x_test <- test[,1:10]
+  y_test <- test$metric
+  
+  # scale
+  x_train <- scale(x_train)
+  x_test <- scale(x_test, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
+  
+  model_nn <- keras_model_sequential()
+  
+  model_nn %>% 
+    layer_dense(
+      units              = 10, 
+      kernel_initializer = "normal", 
+      activation         = "relu", 
+      input_shape        = ncol(x_train)) %>% 
+    
+    layer_dense(
+      units              = 4, 
+      kernel_initializer = "normal", 
+      activation         = "relu") %>% 
+    
+    layer_dense(
+      units              = 1, 
+      kernel_initializer = "normal",
+      activation         = "linear") %>%
+    
+    compile(
+      loss = "mse",
+      optimizer = optimizer_adamax()
+    )
+  
+  history <- fit(
+    object           = model_nn, 
+    x                = x_train, 
+    y                = y_train,
+    batch_size       = 512, 
+    epochs           = 120,
+    validation_data  = list(x_test, y_test),
+    shuffle          = TRUE,
+    callbacks        = list(callback_early_stopping(monitor = "val_loss", patience = 3, restore_best_weights = TRUE)),
+    verbose          = 0
+  )
+  
+  for (subject in subjects)
+  {
+    val <- data_wesad[data_wesad$Subject == subject,]
+    
+    x_val <- val[,1:10]
+    yhat_xgb <- predict(model_xgb, as.matrix(x_val))
+    x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_train, "scaled:scale"))
+    yhat_nn <- as.data.frame(predict(model_nn, x_val))
+    yhat_nn <- yhat_nn[,1]
+    yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
+    yhat_ens <- weighted(yhat_xgb, yhat_nn)
+    yhat_xgb <- round(yhat_xgb)
+    yhat_nn <- round(yhat_nn)
+    yhat_ens <- round(yhat_ens)
+    acc_xgb <- sum(as.numeric(val$metric == yhat_xgb))/nrow(val)
+    acc_ann <- sum(as.numeric(val$metric == yhat_nn))/nrow(val)
+    acc_ens <- sum(as.numeric(val$metric == yhat_ens))/nrow(val)
+    
+    # precision, recall, F1 score
+    precision <- posPredValue(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
+    recall <- sensitivity(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
+    F1 <- (2 * precision * recall) / (precision + recall)
+    
+    res <- cbind(subject, acc_xgb, acc_ann, acc_ens, precision, recall, F1)
+    res <- as.data.frame(res)
+    names(res) <- c("SUBJECT","XGB","ANN","ENS", "PRECISION", "RECALL", "F1")
+    results <- rbind(results, res)
+  }
+  
+  results$XGB <- as.numeric(results$XGB)
+  results$ANN <- as.numeric(results$ANN)
+  results$ENS <- as.numeric(results$ENS)
+  results$PRECISION <- as.numeric(results$PRECISION)
+  results$RECALL <- as.numeric(results$RECALL)
+  results$F1 <- as.numeric(results$F1)
+  
+  temp <- cbind(loop, mean(results$XGB, na.rm=TRUE), mean(results$ANN, na.rm=TRUE), mean(results$ENS, na.rm=TRUE), mean(results$PRECISION, na.rm=TRUE), mean(results$RECALL, na.rm=TRUE), mean(results$F1, na.rm=TRUE))
+  temp <- as.data.frame(temp)
+  main_results <- rbind(main_results, temp)
+  
+}
+names(main_results) <- c("Iteration", "XGB", "ANN", "Ensemble","Precision","Recall","F1")
+write.csv(main_results, "Experiment7_Main10.csv", row.names = FALSE)
+print(mean(main_results$XGB)) # 0.8246982
+print(mean(main_results$ANN)) # 0.8246982
+print(mean(main_results$Ensemble)) # 0.8503623
+print(mean(main_results$Precision)) # 0.9007939
+print(mean(main_results$Recall)) # 0.7364272
+print(mean(main_results$F1)) # 0.7816372
 
-history <- fit(
-  object           = model_nn, 
-  x                = x_train, 
-  y                = y_train,
-  batch_size       = 512, 
-  epochs           = 120,
-  validation_data  = list(x_test, y_test),
-  shuffle          = TRUE,
-  callbacks        = list(callback_early_stopping(monitor = "val_loss", patience = 3, restore_best_weights = TRUE)),
-  verbose          = 1
-)
-
-#########################################################################################################################################################
-# Test on unseen TOADSTOOL data - no metric or label available
-#########################################################################################################################################################
-data_toadstool <- stresshelpers::make_toadstool_data('TOADSTOOL')
-data_toadstool <- data_toadstool %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject)
-data_toadstool <- data_toadstool[data_toadstool$Subject=="T2",]
-
-weighted <- function(xgb, ann) (xgb*0.5) + (ann*0.5)
-x_val <- data_toadstool[,1:10]
-
-# predict using XGB
-yhat_xgb <- predict(model_xgb, as.matrix(x_val))
-
-# predict using ANN
-x_val <- scale(x_val)
-yhat_nn <- as.data.frame(predict(model_nn, x_val))
-yhat_nn <- yhat_nn[,1]
-# scale between 0 and 1
-yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
-
-# ensemble
-val <- data_toadstool
-val$yhat_nn <- yhat_nn
-val$yhat_xgb <- yhat_xgb
-val$ensemble <- weighted(val$yhat_xgb , val$yhat_nn) 
-
-# plot subject T2
-temp <- val[val$Subject=="T2",]
-temp$ID <- seq.int(nrow(temp))
-ggplot(temp, aes(x=ID)) + 
-  geom_line(aes(y = runMean(ensemble, 360) , colour="ENS"), size=0.5) + 
-  scale_color_lancet() + scale_fill_lancet() +
-  labs(colour="Model") + 
-  guides(color = guide_legend(override.aes = list(fill="white", size=5))) + 
-  theme_classic() + ylab('Stress - T2') + xlab('Time (seconds)') + 
-  scale_x_continuous(breaks=seq(0,nrow(temp)+360,360)) +
-  theme(axis.title = element_text(size = 22, family="Times New Roman",face="bold")) +
-  theme(axis.text=element_text(size=18, family="Times New Roman",face="bold")) +
-  theme(plot.title = element_text(family="Times New Roman",face="bold")) +
-  theme(legend.text = element_text(family="Times New Roman",face="bold", size=18)) +
-  theme(legend.title =  element_text(family="Times New Roman",face="bold", size=18)) +
-  theme(
-    axis.title.y = element_text(vjust = +1),
-    axis.title.x = element_text(vjust = -0.8)
-  ) 
+print(sd(main_results$XGB)) # 0.01587863
+print(sd(main_results$ANN)) # 0.04512476
+print(sd(main_results$Ensemble)) # 0.02935605
+print(sd(main_results$Precision)) # 0.04185531
+print(sd(main_results$Recall)) # 0.06595269
+print(sd(main_results$F1)) # 0.06289532
 
 
