@@ -364,8 +364,7 @@ for (loop in seq(1:10))
   main_results <- rbind(main_results, temp)
   
 }
-names(main_results) <- c("Iteration", "XGB", "ANN", "Ensemble","Precision","Recall","F1")
-write.csv(main_results, "Experiment7_Main10.csv", row.names = FALSE)
+
 print(mean(main_results$XGB)) # 0.8246982
 print(mean(main_results$ANN)) # 0.8246982
 print(mean(main_results$Ensemble)) # 0.8503623
