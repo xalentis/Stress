@@ -34,7 +34,7 @@
 # Amin, M. R., Wickramasuriya, D., & Faghih, R. T. (2022). A Wearable Exam Stress Dataset for Predicting Cognitive Performance in Real-World Settings (version 1.0.0). 
 # PhysioNet. https://doi.org/10.13026/kvkb-aj90.
 
-#devtools::install_github("gideonvosjcu/stresshelpers", force=TRUE)
+#devtools::install_github("xalentis/Stress/stresshelpers", force=TRUE)
 library(stresshelpers)
 library(dplyr)
 
