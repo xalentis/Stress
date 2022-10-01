@@ -43,7 +43,7 @@ library(summarytools)
 library(e1071)
 library(ggsci)
 library(ggpubr)
-#devtools::install_github("gideonvosjcu/stresshelpers", force=TRUE)
+#devtools::install_github("xalentis/Stress/stresshelpers", force=TRUE)
 library(stresshelpers)
 
 options(scipen=999)
