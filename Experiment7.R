@@ -384,7 +384,7 @@ x_val <- scale(x_val, center = attr(x_train, "scaled:center") , scale = attr(x_t
 yhat_nn <- as.data.frame(predict(model_nn, x_val))
 yhat_nn <- yhat_nn[,1]
 yhat_nn <- (yhat_nn - min(yhat_nn)) / (max(yhat_nn) - min(yhat_nn))
-yhat_ens <- weighted(yhat_xgb, yhat_nn)
+yhat_ens <- weighted_long(yhat_xgb, yhat_nn)
 temp <- cbind(yhat_xgb, yhat_nn, yhat_ens, temp$metric)
 temp <- as.data.frame(temp)
 names(temp) <- c("xgb","ann","ens","metric")
