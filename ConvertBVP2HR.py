@@ -23,7 +23,7 @@ def extract(subject):
     hr = np.concatenate((hr1, hr2, hr3), axis=None)
 
     # rest phase eda
-    with open('./data/eda_' + subject + '_T2.csv') as file_name:
+    with open('./data/eda_' + subject + '_T1.csv') as file_name:
         eda1 = np.loadtxt(file_name, delimiter=",")
 
     # speech phase eda
