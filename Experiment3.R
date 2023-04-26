@@ -40,6 +40,7 @@ library(caret)
 library(xgboost)
 library(zoo)
 library(stresshelpers)
+library(randomForest)
 
 options(scipen=999)
 
@@ -56,6 +57,45 @@ data <- rbind(data_neuro, data_swell, data_wesad, data_ubfc) # 99 subjects
 
 rm(data_neuro, data_ubfc, data_swell, data_wesad)
 gc()
+
+#########################################################################################################################################################
+# Model training - Random Forest LOSO no feature engineering
+#########################################################################################################################################################
+
+subjects <- unique(data$Subject)
+index <- 1
+results <- NULL
+
+for (subject in subjects)
+{
+  print(subject)
+  val <- data[data$Subject == subject,]
+  temp <- data[!(data$Subject == subject),]
+  
+  val$metric <- as.factor(val$metric)
+  val$Subject <- NULL
+  temp$metric <- as.factor(temp$metric)
+  temp$Subject <- NULL
+  
+  if (length(levels(val$metric)) == 2)
+  {
+    model_rf = randomForest(x = temp[,1:2], y = temp$metric, ntree = 200, random_state = 123)
+    y_hat = predict(model_rf, newdata = val[,1:2])
+    acc <- sum(val$metric == y_hat)/nrow(val)
+    precision <- posPredValue(y_hat, val$metric, positive="1")
+    recall <- sensitivity(y_hat, val$metric, positive="1")
+    F1 <- (2 * precision * recall) / (precision + recall)
+    res <- cbind(subject, acc, precision, recall, F1)
+    res <- as.data.frame(res)
+    names(res) <- c("SUBJECT","ACC", "PRECISION", "RECALL", "F1")
+    results <- rbind(results, res)
+  }
+}
+print(mean(as.numeric(results$ACC))) # 0.4840103
+write.csv(results, "Ex3_RF.csv", row.names = FALSE)
+
+
+
 #########################################################################################################################################################
 # Parameter Search
 #########################################################################################################################################################
@@ -159,7 +199,8 @@ results$XGB <- as.numeric(results$XGB)
 results$PRECISION <- as.numeric(results$PRECISION)
 results$RECALL <- as.numeric(results$RECALL)
 results$F1 <- as.numeric(results$F1)
-print(mean(results$XGB, na.rm=TRUE)) # 0.6336228
-print(mean(results$PRECISION, na.rm=TRUE)) # 0.4409725
-print(mean(results$RECALL, na.rm=TRUE)) # 0.6840565
-print(mean(results$F1, na.rm=TRUE)) # 0.5026557
+print(mean(results$XGB, na.rm=TRUE)) # 0.6460696
+print(mean(results$PRECISION, na.rm=TRUE)) # 0.422624
+print(mean(results$RECALL, na.rm=TRUE)) # 0.6811702
+print(mean(results$F1, na.rm=TRUE)) # 0.4758952
+

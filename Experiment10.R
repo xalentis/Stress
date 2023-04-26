@@ -247,13 +247,13 @@ for (loop in seq(1:10))
   Q <- quantile(data$eda, probs=c(.25, .75), na.rm = FALSE)
   iqr <- IQR(data$eda)
   up <-  Q[2]+1.5*iqr # Upper Range  
-  low<- Q[1]-1.5*iqr # Lower Range﻿
+  low<- Q[1]-1.5*iqr # Lower Range
   data <- subset(data, data$eda > (Q[1] - 1.5*iqr) & data$eda < (Q[2]+1.5*iqr))
   
   Q <- quantile(data$hr, probs=c(.25, .75), na.rm = FALSE)
   iqr <- IQR(data$hr)
   up <-  Q[2]+1.5*iqr # Upper Range  
-  low<- Q[1]-1.5*iqr # Lower Range﻿
+  low<- Q[1]-1.5*iqr # Lower Range
   data <- subset(data, data$hr > (Q[1] - 1.5*iqr) & data$hr < (Q[2]+1.5*iqr))
   
   data <- stresshelpers::rolling_features(data, 25)
@@ -362,21 +362,22 @@ for (loop in seq(1:10))
   temp <- cbind(loop, mean(results$XGB, na.rm=TRUE), mean(results$ANN, na.rm=TRUE), mean(results$ENS, na.rm=TRUE), mean(results$PRECISION, na.rm=TRUE), mean(results$RECALL, na.rm=TRUE), mean(results$F1, na.rm=TRUE))
   temp <- as.data.frame(temp)
   main_results <- rbind(main_results, temp)
-  
 }
 
-print(mean(main_results$XGB)) # 0.8246982
-print(mean(main_results$ANN)) # 0.8246982
-print(mean(main_results$Ensemble)) # 0.8503623
-print(mean(main_results$Precision)) # 0.9007939
-print(mean(main_results$Recall)) # 0.7364272
-print(mean(main_results$F1)) # 0.7816372
+names(main_results) <- c("Iteration", "XGB", "ANN", "Ensemble","Precision","Recall","F1")
+write.csv(main_results, "Experiment7_Main10.csv", row.names = FALSE)
+print(mean(main_results$XGB)) # 0.8299884
+print(mean(main_results$ANN)) # 0.8281435
+print(mean(main_results$Ensemble)) # 0.8376998
+print(mean(main_results$Precision)) # 0.9148007
+print(mean(main_results$Recall)) # 0.707705
+print(mean(main_results$F1)) # 0.7504949
 
-print(sd(main_results$XGB)) # 0.01587863
-print(sd(main_results$ANN)) # 0.04512476
-print(sd(main_results$Ensemble)) # 0.02935605
-print(sd(main_results$Precision)) # 0.04185531
-print(sd(main_results$Recall)) # 0.06595269
-print(sd(main_results$F1)) # 0.06289532
+print(sd(main_results$XGB)) # 0.01622647
+print(sd(main_results$ANN)) # 0.04605407
+print(sd(main_results$Ensemble)) # 0.01588675
+print(sd(main_results$Precision)) # 0.04953698
+print(sd(main_results$Recall)) # 0.03000254
+print(sd(main_results$F1)) # 0.03972872
 
 

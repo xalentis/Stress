@@ -44,6 +44,7 @@ library(e1071)
 library(stresshelpers)
 library(keras)
 library(TTR)
+library(randomForest)
 
 options(scipen=999)
 set.seed(123)
@@ -56,6 +57,14 @@ data <- stresshelpers::make_swell_data('SWELL', feature_engineering = TRUE)
 
 data <- data %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
 gc()
+
+#########################################################################################################################################################
+# Model training - random forest
+#########################################################################################################################################################
+metric <- data$metric
+data$metric <- as.factor(data$metric)
+model_rf = randomForest(x = data[,1:10], y = data$metric, ntree = 200, random_state = 123)
+data$metric <- metric
 
 #########################################################################################################################################################
 # Model training - xgboost using optimal parameters
@@ -169,12 +178,17 @@ for (subject in subjects)
   recall <- sensitivity(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
   F1 <- (2 * precision * recall) / (precision + recall)
   
-  res <- cbind(subject, acc_xgb, acc_ann, acc_ens, precision, recall, F1)
+  val$metric <- as.factor(val$metric)
+  yhat_rf <- predict(model_rf, val[,1:10])
+  acc_rf <- sum(val$metric == yhat_rf)/nrow(val)
+  
+  res <- cbind(subject, acc_rf, acc_xgb, acc_ann, acc_ens, precision, recall, F1)
   res <- as.data.frame(res)
-  names(res) <- c("SUBJECT","XGB","ANN","ENS", "PRECISION", "RECALL", "F1")
+  names(res) <- c("SUBJECT","RF","XGB","ANN","ENS", "PRECISION", "RECALL", "F1")
   results <- rbind(results, res)
 }
 
+results$RF <- as.numeric(results$RF)
 results$XGB <- as.numeric(results$XGB)
 results$ANN <- as.numeric(results$ANN)
 results$ENS <- as.numeric(results$ENS)
@@ -182,6 +196,7 @@ results$PRECISION <- as.numeric(results$PRECISION)
 results$RECALL <- as.numeric(results$RECALL)
 results$F1 <- as.numeric(results$F1)
 
+print(mean(results$RF, na.rm=TRUE)) # 0.45
 print(mean(results$XGB, na.rm=TRUE)) # 0.49
 print(mean(results$ANN, na.rm=TRUE)) # 0.58
 print(mean(results$ENS, na.rm=TRUE)) # 0.59
@@ -224,12 +239,17 @@ for (subject in subjects)
   recall <- sensitivity(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
   F1 <- (2 * precision * recall) / (precision + recall)
   
-  res <- cbind(subject, acc_xgb, acc_ann, acc_ens, precision, recall, F1)
+  val$metric <- as.factor(val$metric)
+  yhat_rf <- predict(model_rf, val[,1:10])
+  acc_rf <- sum(val$metric == yhat_rf)/nrow(val)
+  
+  res <- cbind(subject, acc_rf, acc_xgb, acc_ann, acc_ens, precision, recall, F1)
   res <- as.data.frame(res)
-  names(res) <- c("SUBJECT","XGB","ANN","ENS", "PRECISION", "RECALL", "F1")
+  names(res) <- c("SUBJECT","RF","XGB","ANN","ENS", "PRECISION", "RECALL", "F1")
   results <- rbind(results, res)
 }
 
+results$RF <- as.numeric(results$RF)
 results$XGB <- as.numeric(results$XGB)
 results$ANN <- as.numeric(results$ANN)
 results$ENS <- as.numeric(results$ENS)
@@ -237,6 +257,7 @@ results$PRECISION <- as.numeric(results$PRECISION)
 results$RECALL <- as.numeric(results$RECALL)
 results$F1 <- as.numeric(results$F1)
 
+print(mean(results$RF, na.rm=TRUE)) # 0.63
 print(mean(results$XGB, na.rm=TRUE)) # 0.68
 print(mean(results$ANN, na.rm=TRUE)) # 0.56
 print(mean(results$ENS, na.rm=TRUE)) # 0.69

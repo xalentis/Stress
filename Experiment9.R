@@ -45,6 +45,7 @@ library(stresshelpers)
 library(keras)
 library(tensorflow)
 library(TTR)
+library(randomForest)
 
 options(scipen=999)
 set.seed(123)
@@ -233,7 +234,7 @@ rm(nonstressed, stressed, newdata, nonstressed_subjects, stressed_subjects)
 gc()
 
 #########################################################################################################################################################
-# Model training - xgboost using optimal parameters with LOSO
+# Model evaluation with ensemble and random forest for comparison
 #########################################################################################################################################################
 subjects <- unique(data$Subject) # 200
 index <- 1
@@ -254,6 +255,9 @@ for (subject in subjects)
   print(index)
   val <- data[data$Subject == subject,]
   temp <- data[!(data$Subject == subject),]
+  
+  metric <- as.factor(temp$metric)
+  model_rf = randomForest(x = temp[,1:10], y = metric, ntree = 200, random_state = 123)
   
   train.index <- createDataPartition(temp$Subject, p = .7, list = FALSE) # 70/30 train/test split along metric
   train <- temp[train.index,]
@@ -328,6 +332,11 @@ for (subject in subjects)
   yhat_xgb <- round(yhat_xgb)
   yhat_nn <- round(yhat_nn)
   yhat_ens <- round(yhat_ens)
+  
+  metric <- as.factor(val$metric)
+  yhat_rf <- predict(model_rf, val[,1:10])
+  acc_rf <- sum(metric == yhat_rf)/nrow(val)
+  
   acc_xgb <- sum(as.numeric(val$metric == yhat_xgb))/nrow(val)
   acc_ann <- sum(as.numeric(val$metric == yhat_nn))/nrow(val)
   acc_ens <- sum(as.numeric(val$metric == yhat_ens))/nrow(val)
@@ -337,14 +346,15 @@ for (subject in subjects)
   recall <- sensitivity(factor(yhat_ens, levels=c(0,1)), factor(val$metric, levels=c(0,1)), positive="1")
   F1 <- (2 * precision * recall) / (precision + recall)
   
-  res <- cbind(subject, acc_xgb, acc_ann, acc_ens, precision, recall, F1)
+  res <- cbind(subject, acc_rf, acc_xgb, acc_ann, acc_ens, precision, recall, F1)
   res <- as.data.frame(res)
-  names(res) <- c("SUBJECT","XGB","ANN","ENS", "PRECISION", "RECALL", "F1")
+  names(res) <- c("SUBJECT","RF","XGB","ANN","ENS", "PRECISION", "RECALL", "F1")
   results <- rbind(results, res)
-  write.csv(results, "Results_Exp10.csv",row.names = FALSE)
+  write.csv(results, "Results_Exp9.csv",row.names = FALSE)
   index <- index + 1
 }
 
+results$RF <- as.numeric(results$RF)
 results$XGB <- as.numeric(results$XGB)
 results$ANN <- as.numeric(results$ANN)
 results$ENS <- as.numeric(results$ENS)
@@ -352,13 +362,17 @@ results$PRECISION <- as.numeric(results$PRECISION)
 results$RECALL <- as.numeric(results$RECALL)
 results$F1 <- as.numeric(results$F1)
 
-print(mean(results$XGB, na.rm=TRUE)) # 0.8885554
-print(mean(results$ANN, na.rm=TRUE)) # 0.8579641
-print(mean(results$ENS, na.rm=TRUE)) # 0.8900988
-print(mean(results$PRECISION, na.rm=TRUE)) # 0.90
-print(mean(results$RECALL, na.rm=TRUE)) # 0.88
-print(mean(results$F1, na.rm=TRUE)) # 0.89
+print(mean(results$RF, na.rm=TRUE)) # 0.8887564
+print(mean(results$XGB, na.rm=TRUE)) # 0.8901569
+print(mean(results$ANN, na.rm=TRUE)) # 0.8610495
+print(mean(results$ENS, na.rm=TRUE)) # 0.8908093
+print(mean(results$PRECISION, na.rm=TRUE)) # 0.8960545
+print(mean(results$RECALL, na.rm=TRUE)) # 0.8906194
+print(mean(results$F1, na.rm=TRUE)) # 0.8878298
 
+print(mean((results$RF + results$XGB)/2, na.rm=TRUE)) # 0.8894536
+print(mean((results$RF + results$ANN)/2, na.rm=TRUE)) # 0.8745816
+print(mean((results$ANN + results$RF + results$XGB)/3, na.rm=TRUE)) # 0.8795658
 #########################################################################################################################################################
 # Test
 #########################################################################################################################################################
@@ -423,7 +437,7 @@ ggplot(temp, aes(x=ID)) +
     axis.title.x = element_text(vjust = -0.8)
   ) 
 
-ens_best <- nrow(results[results$ENS >= results$XGB & results$ENS >= results$ANN,])/nrow(results) # 51.5%
-ens_best_xgb <- nrow(results[results$ENS >= results$XGB,])/nrow(results) # 79.5%
-ens_best_ann <- nrow(results[results$ENS >= results$ANN,])/nrow(results) # 66.5%
-ann_best_xgb <- nrow(results[results$ANN >= results$XGB,])/nrow(results) # 37.5
+ens_best <- nrow(results[results$ENS >= results$XGB & results$ENS >= results$ANN,])/nrow(results) # 53%
+ens_best_xgb <- nrow(results[results$ENS >= results$XGB,])/nrow(results) # 79%
+ens_best_ann <- nrow(results[results$ENS >= results$ANN,])/nrow(results) # 68%
+
