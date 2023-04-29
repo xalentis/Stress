@@ -75,10 +75,10 @@ test <- data[-train.index,]
 
 # found using hyper parameter search
 params <- list(
-  eta = 0.1, 
-  max_depth = 8, 
-  subsample = 0.5,
-  colsample_bytree = 0.2
+  eta = 0.5, 
+  max_depth = 8,
+  subsample = 0.7,
+  colsample_bytree = 0.4
 )
 dtrain <- xgb.DMatrix(data = as.matrix(train[,1:10]), label = train$metric)
 dtest <- xgb.DMatrix(data = as.matrix(test[,1:10]), label = test$metric)
@@ -196,13 +196,13 @@ results$PRECISION <- as.numeric(results$PRECISION)
 results$RECALL <- as.numeric(results$RECALL)
 results$F1 <- as.numeric(results$F1)
 
-print(mean(results$RF, na.rm=TRUE)) # 0.45
-print(mean(results$XGB, na.rm=TRUE)) # 0.49
-print(mean(results$ANN, na.rm=TRUE)) # 0.58
-print(mean(results$ENS, na.rm=TRUE)) # 0.59
-print(mean(results$PRECISION, na.rm=TRUE)) # 0.65
-print(mean(results$RECALL, na.rm=TRUE)) # 0.59
-print(mean(results$F1, na.rm=TRUE)) # 0.60
+print(mean(results$RF, na.rm=TRUE)) # 0.4556323
+print(mean(results$XGB, na.rm=TRUE)) # 0.5078612
+print(mean(results$ANN, na.rm=TRUE)) # 0.5624357
+print(mean(results$ENS, na.rm=TRUE)) # 0.5699825
+print(mean(results$PRECISION, na.rm=TRUE)) # 0.8092503
+print(mean(results$RECALL, na.rm=TRUE)) # 0.3447943
+print(mean(results$F1, na.rm=TRUE)) # 0.4341551
 
 
 #########################################################################################################################################################
@@ -211,7 +211,7 @@ print(mean(results$F1, na.rm=TRUE)) # 0.60
 data_wesad <- stresshelpers::make_wesad_data('WESAD', feature_engineering = TRUE)
 data_wesad <- data_wesad %>% select(hrrange, hrvar, hrstd, hrmin, edarange, edastd, edavar, hrkurt, edamin, hrmax, Subject, metric)
 
-weighted <- function(xgb, ann) (xgb*0.8) + (ann*0.2)
+weighted <- function(xgb, ann) (xgb*0.2) + (ann*0.8)
 
 results <- NULL
 subjects <- unique(data_wesad$Subject)
@@ -257,10 +257,12 @@ results$PRECISION <- as.numeric(results$PRECISION)
 results$RECALL <- as.numeric(results$RECALL)
 results$F1 <- as.numeric(results$F1)
 
-print(mean(results$RF, na.rm=TRUE)) # 0.63
-print(mean(results$XGB, na.rm=TRUE)) # 0.68
-print(mean(results$ANN, na.rm=TRUE)) # 0.56
-print(mean(results$ENS, na.rm=TRUE)) # 0.69
-print(mean(results$PRECISION, na.rm=TRUE)) # 0.40
-print(mean(results$RECALL, na.rm=TRUE)) # 0.12
-print(mean(results$F1, na.rm=TRUE)) # 0.26
+print(mean(results$RF, na.rm=TRUE)) # 0.634383
+print(mean(results$XGB, na.rm=TRUE)) # 0.6880531
+print(mean(results$ANN, na.rm=TRUE)) # 0.41593
+print(mean(results$ENS, na.rm=TRUE)) # 0.4680533
+print(mean(results$PRECISION, na.rm=TRUE)) # 0.3065183
+print(mean(results$RECALL, na.rm=TRUE)) # 0.5623052
+print(mean(results$F1, na.rm=TRUE)) # 0.3363315
+
+
