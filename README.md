@@ -5,4 +5,4 @@ When using any or all of this source code, please cite:
 
 Ensemble Machine Learning Model Trained on a New Synthesized Dataset Generalizes Well for Stress Prediction Using Wearable Devices
 Gideon Vos, Kelly Trinh, Zoltan Sarnyai, Mostafa Rahimi Azghadi
-doi = {10.48550/ARXIV.2209.15146}
+doi = https://doi.org/10.1016/j.jbi.2023.104556
